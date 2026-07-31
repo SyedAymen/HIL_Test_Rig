@@ -1,0 +1,355 @@
+[
+  {
+    "id": "tab-ahu-rig",
+    "type": "tab",
+    "label": "AHU Rig - MQTT <-> WS Bridge",
+    "disabled": false,
+    "info": "Matches the real contract in useWebSocket.js / rig.js: envelope {type, payload, ts}. See README for the full type table."
+  },
+  {
+    "id": "mqtt-broker-local",
+    "type": "mqtt-broker",
+    "name": "Local Mosquitto",
+    "broker": "localhost",
+    "port": "1883",
+    "clientid": "node-red-ahu-rig",
+    "usetls": false,
+    "keepalive": "30",
+    "cleansession": true
+  },
+  {
+    "id": "ws-listener-dashboard",
+    "type": "websocket-listener",
+    "path": "/ws/dashboard",
+    "wholemsg": "false"
+  },
+
+  {
+    "id": "comment-in",
+    "type": "comment",
+    "z": "tab-ahu-rig",
+    "name": "ESP32 -> Mosquitto -> Node-RED -> Dashboard",
+    "x": 200, "y": 40, "wires": []
+  },
+  {
+    "id": "mqtt-in-telemetry",
+    "type": "mqtt in",
+    "z": "tab-ahu-rig",
+    "name": "point telemetry (ESP32 -> server)",
+    "topic": "ahu-rig/+/telemetry",
+    "qos": "0",
+    "datatype": "json",
+    "broker": "mqtt-broker-local",
+    "x": 220, "y": 100,
+    "wires": [["fn-mqtt-telemetry-to-ws"]]
+  },
+  {
+    "id": "fn-mqtt-telemetry-to-ws",
+    "type": "function",
+    "z": "tab-ahu-rig",
+    "name": "-> {type:'telemetry'}",
+    "func": "// topic: ahu-rig/<id>/telemetry   payload (json): { hmiValue, controllerValue?, confirmed?, ts? }\n// Matches rig.js handleMessage 'telemetry': Object.assign(point, msg.payload) then recordSample.\nconst id = msg.topic.split('/')[1];\nconst p = msg.payload || {};\n\n// Broadcast to all connected dashboards (no msg._session = broadcast).\nmsg = {\n    payload: JSON.stringify({\n        type: 'telemetry',\n        payload: { id: id, hmiValue: p.hmiValue, controllerValue: p.controllerValue, confirmed: p.confirmed },\n        ts: Date.now()\n    })\n};\nreturn msg;",
+    "outputs": 1,
+    "x": 470, "y": 100,
+    "wires": [["ws-out-dashboard"]]
+  },
+
+  {
+    "id": "mqtt-in-status",
+    "type": "mqtt in",
+    "z": "tab-ahu-rig",
+    "name": "device online/offline (LWT, retained)",
+    "topic": "ahu-rig/status",
+    "qos": "1",
+    "datatype": "utf8",
+    "broker": "mqtt-broker-local",
+    "x": 240, "y": 160,
+    "wires": [["fn-status-to-alarm"]]
+  },
+  {
+    "id": "fn-status-to-alarm",
+    "type": "function",
+    "z": "tab-ahu-rig",
+    "name": "-> {type:'alarm'} on offline",
+    "func": "// The dashboard has no dedicated 'device connectivity' message type — it\n// only understands the types listed in rig.js. We surface ESP32 dropouts\n// through the existing alarm channel (shape confirmed against AlertPanel.vue:\n// { id, severity, title, detail, ts }). Adjust if you add a proper\n// 'device.status' type to rig.js later.\nconst online = msg.payload === 'online';\nflow.set('deviceOnline', online);\nif (online) return null; // no alarm needed on reconnect; UI clears via retained state on reload only\n\nmsg = {\n    payload: JSON.stringify({\n        type: 'alarm',\n        payload: {\n            id: 'device-esp32-01-offline',\n            severity: 'critical',\n            title: 'ESP32 rig disconnected',\n            detail: 'Lost MQTT connection to esp32-ahu-rig-01 (Ethernet/broker link down).',\n            ts: Date.now()\n        },\n        ts: Date.now()\n    })\n};\nreturn msg;",
+    "outputs": 1,
+    "x": 500, "y": 160,
+    "wires": [["ws-out-dashboard"]]
+  },
+
+  {
+    "id": "ws-out-dashboard",
+    "type": "websocket out",
+    "z": "tab-ahu-rig",
+    "name": "-> dashboard",
+    "client": "",
+    "server": "ws-listener-dashboard",
+    "x": 720, "y": 130,
+    "wires": []
+  },
+
+  {
+    "id": "comment-out",
+    "type": "comment",
+    "z": "tab-ahu-rig",
+    "name": "Dashboard -> Node-RED -> Mosquitto -> ESP32",
+    "x": 210, "y": 260, "wires": []
+  },
+  {
+    "id": "ws-in-dashboard",
+    "type": "websocket in",
+    "z": "tab-ahu-rig",
+    "name": "<- dashboard",
+    "client": "",
+    "server": "ws-listener-dashboard",
+    "x": 210, "y": 320,
+    "wires": [["fn-ws-router"]]
+  },
+  {
+    "id": "fn-ws-router",
+    "type": "function",
+    "z": "tab-ahu-rig",
+    "name": "route by msg.type",
+    "func": "// msg.payload is the raw JSON string sent by useWebSocket.js's send():\n// { type, payload, ts }. IMPORTANT: keep returning the *same* msg object\n// (mutating msg.payload only) wherever we want a unicast reply — Node-RED's\n// websocket out node uses msg._session, set by websocket in, to reply to\n// only the sending client. Building a brand-new {payload:...} object drops\n// _session and broadcasts to every connected dashboard instead.\nlet env;\ntry { env = JSON.parse(msg.payload); }\ncatch (e) { node.warn('bad WS json: ' + msg.payload); return null; }\n\nswitch (env.type) {\n    case 'ping': {\n        msg.payload = JSON.stringify({ type: 'pong', payload: null, ts: Date.now() });\n        return [msg, null, null, null, null]; // unicast back on same _session\n    }\n    case 'io.command': {\n        // { id, value } -> stimulus command to ESP32\n        return [null, {\n            topic: `ahu-rig/${env.payload.id}/cmd`,\n            payload: JSON.stringify({ value: env.payload.value }),\n            qos: 0, retain: false\n        }, null, null, null];\n    }\n    case 'sim.set': {\n        return [null, null, {\n            topic: 'ahu-rig/sim',\n            payload: JSON.stringify({ on: !!env.payload.on }),\n            qos: 1, retain: true\n        }, null, null];\n    }\n    case 'sim.releaseAll': {\n        return [null, null, null, {\n            topic: 'ahu-rig/release',\n            payload: '{}',\n            qos: 1, retain: false\n        }, null];\n    }\n    case 'io.add':\n    case 'io.remove':\n    case 'manual.entry':\n    case 'manual.confirm': {\n        // Now persisted — see \"AHU Rig - Persistence & Storage Stats\" tab.\n        const pmsg = { payload: env };\n        return [null, null, null, null, pmsg];\n    }\n    default:\n        node.warn('[ws router] unhandled type: ' + env.type);\n        return [null, null, null, null, null];\n}",
+    "outputs": 5,
+    "x": 460, "y": 320,
+    "wires": [["ws-out-dashboard"], ["mqtt-out-cmd"], ["mqtt-out-sim"], ["mqtt-out-release"], ["link-out-persistence"]]
+  },
+  {
+    "id": "link-out-persistence",
+    "type": "link out",
+    "z": "tab-ahu-rig",
+    "name": "-> persistence",
+    "mode": "link",
+    "links": ["link-in-persistence"],
+    "x": 700, "y": 400,
+    "wires": []
+  },
+  {
+    "id": "mqtt-out-cmd",
+    "type": "mqtt out",
+    "z": "tab-ahu-rig",
+    "name": "point cmd -> ESP32",
+    "topic": "",
+    "qos": "0",
+    "retain": "false",
+    "broker": "mqtt-broker-local",
+    "x": 720, "y": 280,
+    "wires": []
+  },
+  {
+    "id": "mqtt-out-sim",
+    "type": "mqtt out",
+    "z": "tab-ahu-rig",
+    "name": "SIM ON/OFF -> ESP32",
+    "topic": "ahu-rig/sim",
+    "qos": "1",
+    "retain": "true",
+    "broker": "mqtt-broker-local",
+    "x": 730, "y": 320,
+    "wires": []
+  },
+  {
+    "id": "mqtt-out-release",
+    "type": "mqtt out",
+    "z": "tab-ahu-rig",
+    "name": "Release All -> ESP32",
+    "topic": "ahu-rig/release",
+    "qos": "1",
+    "retain": "false",
+    "broker": "mqtt-broker-local",
+    "x": 740, "y": 360,
+    "wires": []
+  },
+
+  {
+    "id": "comment-sim-echo",
+    "type": "comment",
+    "z": "tab-ahu-rig",
+    "name": "Echo sim state back so a freshly-loaded dashboard reconciles (rig.js sim.status handler)",
+    "x": 280, "y": 420, "wires": []
+  },
+  {
+    "id": "fn-sim-echo",
+    "type": "function",
+    "z": "tab-ahu-rig",
+    "name": "SIM ON/OFF -> {type:'sim.status'}",
+    "func": "const p = msg.payload || {};\nmsg = {\n    payload: JSON.stringify({ type: 'sim.status', payload: { on: !!p.on }, ts: Date.now() })\n};\nreturn msg;",
+    "outputs": 1,
+    "x": 480, "y": 420,
+    "wires": [["ws-out-dashboard"]]
+  },
+  {
+    "id": "mqtt-in-sim-retained",
+    "type": "mqtt in",
+    "z": "tab-ahu-rig",
+    "name": "sim state (retained)",
+    "topic": "ahu-rig/sim",
+    "qos": "1",
+    "datatype": "json",
+    "broker": "mqtt-broker-local",
+    "x": 230, "y": 420,
+    "wires": [["fn-sim-echo"]]
+  },
+
+  {
+    "id": "tab-ahu-persistence",
+    "type": "tab",
+    "label": "AHU Rig - Persistence & Storage Stats",
+    "disabled": false,
+    "info": "Fills the previously-flagged gaps: io.add/io.remove/manual.entry/manual.confirm persistence, testplan.set on connect/deploy, storage.stats, io.commanded hardware ack. Requires functionGlobalContext.fs — see settings-static-snippet.js."
+  },
+
+  {
+    "id": "comment-persist-1",
+    "type": "comment",
+    "z": "tab-ahu-persistence",
+    "name": "io.add / io.remove / manual.entry / manual.confirm -> persist to disk -> rebroadcast testplan.set",
+    "x": 330, "y": 40, "wires": []
+  },
+  {
+    "id": "link-in-persistence",
+    "type": "link in",
+    "z": "tab-ahu-persistence",
+    "name": "<- ws router",
+    "links": ["link-out-persistence"],
+    "x": 130, "y": 100,
+    "wires": [["fn-persist-and-rebroadcast"]]
+  },
+  {
+    "id": "fn-persist-and-rebroadcast",
+    "type": "function",
+    "z": "tab-ahu-persistence",
+    "name": "persist event, save plan, log audit",
+    "func": "// msg.payload = { type, payload, ts } (already-parsed object, not JSON string —\n// see fn-ws-router's 5th output).\n// Requires settings.js: functionGlobalContext: { fs: require('fs') }\nconst fs = global.get('fs');\nconst PLAN_FILE = '/home/pi/ahu-rig-data/testplan.json';\nconst AUDIT_FILE = '/home/pi/ahu-rig-data/audit-log.jsonl';\nconst env = msg.payload;\n\nfunction loadPlan() {\n    try {\n        return JSON.parse(fs.readFileSync(PLAN_FILE, 'utf8'));\n    } catch (e) {\n        // First run / file missing — start from an empty shell. Seed it\n        // properly by copying your real seedTestPlan.js output here once,\n        // or POST it in via an admin flow — out of scope for this pass.\n        return { sections: [] };\n    }\n}\n\nfunction savePlan(plan) {\n    fs.mkdirSync('/home/pi/ahu-rig-data', { recursive: true });\n    fs.writeFileSync(PLAN_FILE, JSON.stringify(plan, null, 2));\n}\n\nfunction appendAudit(entry) {\n    fs.mkdirSync('/home/pi/ahu-rig-data', { recursive: true });\n    fs.appendFileSync(AUDIT_FILE, JSON.stringify(entry) + '\\n');\n}\n\nfunction findPoint(plan, id) {\n    for (const section of plan.sections) {\n        const pt = (section.points || []).find(p => p.id === id);\n        if (pt) return pt;\n    }\n    return null;\n}\n\nconst plan = loadPlan();\n\nswitch (env.type) {\n    case 'io.add': {\n        // env.payload is expected to be a full point object. If your real\n        // rig.js io.add action includes a target sectionId, adjust this —\n        // it wasn't visible in the excerpt reviewed, so we default to the\n        // first section (or create an 'Added Points' section) as a fallback.\n        const point = env.payload;\n        let section = plan.sections.find(s => s.id === point.sectionId) ||\n                      plan.sections.find(s => s.id === 'added-points');\n        if (!section) {\n            section = { id: 'added-points', label: 'Added Points', points: [] };\n            plan.sections.push(section);\n        }\n        section.points = section.points || [];\n        section.points.push(point);\n        break;\n    }\n    case 'io.remove': {\n        const id = env.payload.id;\n        for (const section of plan.sections) {\n            section.points = (section.points || []).filter(p => p.id !== id);\n        }\n        break;\n    }\n    case 'manual.entry': {\n        const pt = findPoint(plan, env.payload.id);\n        if (pt) pt.controllerValue = env.payload.value;\n        break;\n    }\n    case 'manual.confirm': {\n        const pt = findPoint(plan, env.payload.id);\n        if (pt) pt.confirmed = env.payload.confirmed;\n        break;\n    }\n}\n\nsavePlan(plan);\nappendAudit({ ts: Date.now(), type: env.type, payload: env.payload });\n\nmsg.payload = JSON.stringify({ type: 'testplan.set', payload: plan, ts: Date.now() });\nreturn msg;",
+    "outputs": 1,
+    "x": 430, "y": 100,
+    "wires": [["ws-out-dashboard"]]
+  },
+
+  {
+    "id": "comment-persist-2",
+    "type": "comment",
+    "z": "tab-ahu-persistence",
+    "name": "Send current plan on Node-RED (re)deploy so a reload survives a restart",
+    "x": 300, "y": 180, "wires": []
+  },
+  {
+    "id": "inject-startup-plan",
+    "type": "inject",
+    "z": "tab-ahu-persistence",
+    "name": "on deploy",
+    "props": [{ "p": "payload" }],
+    "repeat": "",
+    "once": true,
+    "onceDelay": "2",
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 140, "y": 240,
+    "wires": [["fn-load-and-send-plan"]]
+  },
+  {
+    "id": "fn-load-and-send-plan",
+    "type": "function",
+    "z": "tab-ahu-persistence",
+    "name": "load testplan.json -> testplan.set",
+    "func": "const fs = global.get('fs');\nconst PLAN_FILE = '/home/pi/ahu-rig-data/testplan.json';\nlet plan;\ntry {\n    plan = JSON.parse(fs.readFileSync(PLAN_FILE, 'utf8'));\n} catch (e) {\n    node.warn('No persisted testplan.json yet (first run) — dashboard keeps using its bundled seedTestPlan.js until a point is added/edited.');\n    return null;\n}\nmsg.payload = JSON.stringify({ type: 'testplan.set', payload: plan, ts: Date.now() });\nreturn msg;",
+    "outputs": 1,
+    "x": 430, "y": 240,
+    "wires": [["ws-out-dashboard"]]
+  },
+
+  {
+    "id": "comment-storage-stats",
+    "type": "comment",
+    "z": "tab-ahu-persistence",
+    "name": "storage.stats every 30s",
+    "x": 210, "y": 320, "wires": []
+  },
+  {
+    "id": "inject-storage-stats",
+    "type": "inject",
+    "z": "tab-ahu-persistence",
+    "name": "every 30s",
+    "props": [{ "p": "payload" }],
+    "repeat": "30",
+    "once": true,
+    "onceDelay": "5",
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 140, "y": 380,
+    "wires": [["fn-storage-stats"]]
+  },
+  {
+    "id": "fn-storage-stats",
+    "type": "function",
+    "z": "tab-ahu-persistence",
+    "name": "build storage.stats",
+    "func": "const fs = global.get('fs');\nconst PLAN_FILE = '/home/pi/ahu-rig-data/testplan.json';\nconst AUDIT_FILE = '/home/pi/ahu-rig-data/audit-log.jsonl';\n\nfunction sizeOf(path) {\n    try { return fs.statSync(path).size; } catch (e) { return 0; }\n}\nfunction lineCountOf(path) {\n    try {\n        const txt = fs.readFileSync(path, 'utf8');\n        return txt.split('\\n').filter(Boolean).length;\n    } catch (e) { return 0; }\n}\n\nmsg.payload = JSON.stringify({\n    type: 'storage.stats',\n    payload: {\n        testPlanBytes: sizeOf(PLAN_FILE),\n        auditLogEntries: lineCountOf(AUDIT_FILE),\n        auditLogBytes: sizeOf(AUDIT_FILE),\n        lastCheckedAt: Date.now()\n    },\n    ts: Date.now()\n});\nreturn msg;",
+    "outputs": 1,
+    "x": 420, "y": 380,
+    "wires": [["ws-out-dashboard"]]
+  },
+
+  {
+    "id": "comment-ack",
+    "type": "comment",
+    "z": "tab-ahu-persistence",
+    "name": "io.commanded hardware ack (from ESP32, after it actually applies a stimulus)",
+    "x": 300, "y": 460, "wires": []
+  },
+  {
+    "id": "mqtt-in-cmd-ack",
+    "type": "mqtt in",
+    "z": "tab-ahu-persistence",
+    "name": "cmd ack (ESP32 -> server)",
+    "topic": "ahu-rig/+/cmd/ack",
+    "qos": "0",
+    "datatype": "json",
+    "broker": "mqtt-broker-local",
+    "x": 210, "y": 520,
+    "wires": [["fn-ack-to-commanded"]]
+  },
+  {
+    "id": "fn-ack-to-commanded",
+    "type": "function",
+    "z": "tab-ahu-persistence",
+    "name": "-> {type:'io.commanded'}",
+    "func": "// topic: ahu-rig/<id>/cmd/ack   payload: { value }\nconst id = msg.topic.split('/')[1];\nconst p = msg.payload || {};\nmsg = {\n    payload: JSON.stringify({ type: 'io.commanded', payload: { id: id, value: p.value }, ts: Date.now() })\n};\nreturn msg;",
+    "outputs": 1,
+    "x": 460, "y": 520,
+    "wires": [["ws-out-dashboard"]]
+  },
+
+  {
+    "id": "comment-ota-status",
+    "type": "comment",
+    "z": "tab-ahu-persistence",
+    "name": "ESP32 OTA rollback/validation status -> dashboard alarm",
+    "x": 260, "y": 580, "wires": []
+  },
+  {
+    "id": "mqtt-in-ota-status",
+    "type": "mqtt in",
+    "z": "tab-ahu-persistence",
+    "name": "OTA status (ESP32 -> server)",
+    "topic": "ahu-rig/ota/status",
+    "qos": "0",
+    "datatype": "json",
+    "broker": "mqtt-broker-local",
+    "x": 220, "y": 640,
+    "wires": [["fn-ota-status-to-alarm"]]
+  },
+  {
+    "id": "fn-ota-status-to-alarm",
+    "type": "function",
+    "z": "tab-ahu-persistence",
+    "name": "-> {type:'alarm'}",
+    "func": "// See esp32_ahu_rig.ino's otaRollbackInit/otaNoteHealthySample/otaCheckTimeout —\n// this is the visibility layer for that rollback mechanism on the dashboard.\nconst p = msg.payload || {};\nlet title, detail, severity;\n\nswitch (p.state) {\n    case 'updating':\n        title = 'ESP32 firmware update started';\n        detail = 'New OTA image is being flashed over WiFi.';\n        severity = 'caution';\n        break;\n    case 'validated':\n        title = 'ESP32 firmware update confirmed healthy';\n        detail = 'New firmware passed its post-update health check (Ethernet + MQTT + telemetry). No rollback needed.';\n        severity = 'caution';\n        break;\n    case 'rolling_back':\n        title = 'ESP32 firmware update FAILED — rolling back automatically';\n        detail = 'Reason: ' + (p.reason || 'unknown') + '. Reverting to the previous known-good firmware and rebooting.';\n        severity = 'critical';\n        break;\n    default:\n        return null;\n}\n\nmsg = {\n    payload: JSON.stringify({\n        type: 'alarm',\n        payload: { id: 'esp32-ota-' + Date.now(), severity, title, detail, ts: Date.now() },\n        ts: Date.now()\n    })\n};\nreturn msg;",
+    "outputs": 1,
+    "x": 460, "y": 640,
+    "wires": [["ws-out-dashboard"]]
+  }
+]

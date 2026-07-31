@@ -1,0 +1,48 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body, #app { height: 100%; overflow: hidden; }
+
+@layer components {
+  .panel-card {
+    @apply bg-surface border border-border rounded-2xl shadow-card;
+  }
+  .eyebrow {
+    @apply font-mono text-[11px] tracking-[0.14em] uppercase text-ttext-secondary;
+  }
+  .status-dot {
+    @apply w-2 h-2 rounded-full inline-block flex-none;
+  }
+}
+
+.pulse-dot { position: relative; }
+.pulse-dot::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: inherit;
+  animation: pulse 1.8s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+@keyframes pulse {
+  0% { transform: scale(1); opacity: 0.55; }
+  100% { transform: scale(2.6); opacity: 0; }
+}
+
+/* Thin, subtle scrollbar for internally-scrolling panels (signal rack, right column)
+   so it reads as "this region scrolls on its own", not the whole page moving. */
+.scroll-thin::-webkit-scrollbar { width: 6px; height: 6px; }
+.scroll-thin::-webkit-scrollbar-track { background: transparent; }
+.scroll-thin::-webkit-scrollbar-thumb { background: #D6D9E5; border-radius: 999px; }
+.scroll-thin::-webkit-scrollbar-thumb:hover { background: #BBBFCF; }
+.scroll-thin { scrollbar-width: thin; scrollbar-color: #D6D9E5 transparent; }
+
+/* Rack-specific scrollbar: slightly wider + always-visible track so it's
+   obvious the lane list scrolls independently from the rest of the page. */
+.rack-scroll { scrollbar-gutter: stable; }
+.rack-scroll::-webkit-scrollbar { width: 8px; }
+.rack-scroll::-webkit-scrollbar-track { background: #F0F2F8; border-radius: 999px; margin: 4px 0; }
+.rack-scroll::-webkit-scrollbar-thumb { background: #B0B5C8; border-radius: 999px; border: 2px solid #F0F2F8; }
+.rack-scroll::-webkit-scrollbar-thumb:hover { background: #8A90A8; }
+.rack-scroll { scrollbar-width: thin; scrollbar-color: #B0B5C8 #F0F2F8; }

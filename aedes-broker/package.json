@@ -1,0 +1,17 @@
+{
+  "name": "aedes-broker",
+  "version": "1.0.0",
+  "main": "broker.js",
+  "scripts": {
+    "start": "node broker.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "aedes": "^0.47.0",
+    "net": "^1.0.2"
+  }
+}
