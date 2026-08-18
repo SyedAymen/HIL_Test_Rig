@@ -22,7 +22,7 @@
 #include <Arduino.h>
 #include <stdarg.h>
 #include <SPI.h>
-#include <Ethernet.h>
+#include <ETH.h>
 #include <Wire.h>
 #include <WiFi.h>
 #include <HardwareSerial.h>
@@ -68,12 +68,13 @@ struct RigPoint {
 // ---------------------------------------------------------------------
 // Global objects and constants — actual definitions live in 00_Config.ino
 // ---------------------------------------------------------------------
-extern byte MAC[];
 extern IPAddress STATIC_IP;
 extern IPAddress GATEWAY;
 extern IPAddress SUBNET;
 extern IPAddress DNS_SERVER;
 extern IPAddress MQTT_BROKER;
+extern IPAddress MQTT_BROKER_ETH;
+extern IPAddress MQTT_BROKER_WIFI;
 extern const uint16_t MQTT_PORT;
 extern const char* MQTT_CLIENT_ID;
 
@@ -95,7 +96,7 @@ extern RigPoint points[];
 extern const size_t NUM_POINTS;
 extern const unsigned long TELEMETRY_INTERVAL_MS;
 
-extern EthernetClient ethClient;
+extern WiFiClient ethClient;  // native ETH stack uses WiFiClient for both Ethernet and WiFi transports
 extern PubSubClient mqtt;
 extern HardwareSerial RS485Serial;
 extern ModbusMaster modbus;

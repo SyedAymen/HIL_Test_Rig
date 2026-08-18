@@ -4,6 +4,38 @@ Frontend for the 7" touchscreen panel driving hardware-in-the-loop testing of
 an AHU controller. Talks to Node-RED over a single WebSocket; renders whatever
 it's told; never holds logic Node-RED doesn't already know.
 
+## Rig-direction rework (current model)
+
+Headings now describe the **rig's** signal direction, not the UUT's terminals:
+
+| Tab | Direction | Channel role |
+|-----|-----------|--------------|
+| **AO** — Analog Output | rig sets a 0–10 V level, ESP32 forwards it out | `role: 'output'` |
+| **AI** — Analog Input | rig continuously senses the channel (live monitor) | `role: 'input'` |
+| **DO** — Digital Output | rig sets ON/OFF, forwarded out (settable button) | `role: 'output'` |
+| **DI** — Digital Input | rig senses ON/OFF from the field (read-only pill) | `role: 'input'` |
+
+The old `stimulus`/`response` vocabulary is gone — it assumed a UUT on the
+other end. Points that the rig *produces* live under AO/DO; points it *senses*
+live under AI/DI. Analog values are **raw voltage (0–10 V)** — no engineering-
+unit conversion, no acceptable-value/tolerance framing.
+
+**Verification is disabled.** There's no Modbus/RS485 link to the UUT yet, so
+there's nothing to compare readings against. `store.verificationEnabled` is
+`false`, which hides all pass/fail chrome, tolerance bands, the transfer plot,
+the dual "controller display / HMI reading" boxes and the Automation tab. The
+plumbing (`computeStatus()`, `statusEngine`, `sequenceEngine`, `TransferPlot`)
+is left **dormant, not deleted** — flip the flag to `true` (and swap in a live
+data source) to bring it all back without a rebuild. Node-RED can flip it
+remotely via a `verification.set` message.
+
+The report button is now a **one-click raw snapshot** (top bar → *Export
+Snapshot*): timestamp + every channel's current set/sensed value, one CSV row
+per channel, all sections at once.
+
+Type scale and touch targets were bumped for arm's-length legibility on the
+7" panel (44px+ buttons, 36–48px big values, 12px label floor).
+
 ## Run it
 
 ```bash

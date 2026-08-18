@@ -48,7 +48,7 @@ function submitManualNumeric() {
 }
 function submitManualBool(val) {
   const field = rig.testRun.waitingManual.field
-  if (field === 'confirmed') rig.confirmResponse(rig.testRun.waitingManual.point, val, wsSend)
+  if (field === 'confirmed') rig.confirmInput(rig.testRun.waitingManual.point, val, wsSend)
   else rig.setManualControllerValue(rig.testRun.waitingManual.point, val, wsSend)
 }
 

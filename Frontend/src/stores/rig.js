@@ -5,26 +5,37 @@ import { computeStatus } from '../utils/statusEngine'
 const MAX_SAMPLES = 60
 
 export const useRigStore = defineStore('rig', {
-  state: () => ({
+  state: () => {
+  const seededPlan = seedTestPlan()
+  const firstSection = seededPlan.sections[0]
+  return ({
     connectionStatus: 'connecting',
     // Default false — Node-RED will push the real retained value via sim.status on
     // every dashboard (re)connect, so we don't want an optimistic 'true' here.
     simulationOn: false,
 
-    testPlan: seedTestPlan(), // replace via loadTestPlan() once a real file is uploaded
-    activeSectionId: 'AI',
-    selectedPointId: 'DPT-2',
+    // VERIFICATION FLAG — there is no Modbus/RS485 link to the UUT yet, so there
+    // is nothing to compare readings against. While this is false the dashboard
+    // hides ALL pass/fail chrome, tolerance bands, transfer plots and the manual
+    // "controller display" boxes, and treats every channel as a raw signal.
+    // computeStatus(), the sequence engine and the verification UI all stay in
+    // the codebase, dormant — flip this to true (and swap in a live data source)
+    // to bring them back without a rebuild.
+    verificationEnabled: false,
+
+    testPlan: seededPlan, // replace via loadTestPlan() once a real map is uploaded
+    activeSectionId: firstSection?.id ?? null,
+    selectedPointId: firstSection?.points[0]?.id ?? null,
 
     // { [pointId]: [{ t, hmiValue, controllerValue, commandedValue }] }, newest last, capped at MAX_SAMPLES.
-    // This is what every lane and the transfer plot actually render from — points
-    // themselves only ever hold the *current* value.
     history: {},
 
     alarms: [],
 
     testRun: { sequenceId: null, sequenceName: null, status: 'idle', steps: [], progress: 0, log: [], waitingManual: null },
     storage: { backend: 'sd', usedBytes: 0, capacityBytes: 0 }
-  }),
+  })
+  },
 
   getters: {
     sections: (state) => state.testPlan.sections,
@@ -44,8 +55,8 @@ export const useRigStore = defineStore('rig', {
       return null
     },
 
-    // section counts are always derived from testPlan.sections[].points.length —
-    // never hardcoded, so a 27-point AI section next job just works.
+    // Channel counts are always derived from testPlan.sections[].points.length —
+    // never hardcoded. Passed/failed only mean anything while verification is on.
     sectionSummary: (state) => (sectionId) => {
       const section = state.testPlan.sections.find((s) => s.id === sectionId)
       if (!section) return { total: 0, passed: 0, failed: 0, pending: 0, percent: 0 }
@@ -54,7 +65,7 @@ export const useRigStore = defineStore('rig', {
         const status = computeStatus(p)
         if (status === 'pass') passed++
         else if (status === 'fail') failed++
-        else pending++ // covers 'pending' and 'awaiting-manual'
+        else pending++
       }
       const total = section.points.length
       return { total, passed, failed, pending, percent: total ? Math.round((passed / total) * 100) : 0 }
@@ -81,10 +92,11 @@ export const useRigStore = defineStore('rig', {
       return null
     },
 
-    // reverse lookup: which stimulus (if any) lists this point in its relatedPoints
-    drivingStimulusFor: (state) => (pointId) => {
+    // reverse lookup: which output (if any) lists this point in its relatedPoints.
+    // Dormant while verification is off (causal links are a verification concept).
+    drivingOutputFor: (state) => (pointId) => {
       for (const section of state.testPlan.sections) {
-        const found = section.points.find((p) => p.role === 'stimulus' && (p.relatedPoints || []).includes(pointId))
+        const found = section.points.find((p) => p.role === 'output' && (p.relatedPoints || []).includes(pointId))
         if (found) return found
       }
       return null
@@ -92,8 +104,6 @@ export const useRigStore = defineStore('rig', {
   },
 
   actions: {
-    // Null-safe send wrapper. All outbound actions call this so they don't crash
-    // when invoked before the WS is open (tests, SSR, cold-start race).
     _send(send, msg) {
       try { send?.(msg) } catch (e) { console.warn('[rig store] send error', e) }
     },
@@ -108,10 +118,8 @@ export const useRigStore = defineStore('rig', {
       if (buf.length > MAX_SAMPLES) buf.shift()
     },
 
-    // Backfills a short run of samples around each point's seeded current value
-    // so lanes render a real-looking trace immediately, before any live data
-    // arrives. Demo/dev convenience only — a real deployment's history builds
-    // up naturally from actual telemetry.
+    // Backfills a short run of samples around each channel's seeded value so
+    // lanes render a real-looking trace immediately, before live data arrives.
     initDemoHistory(count = 20) {
       for (const section of this.testPlan.sections) {
         for (const point of section.points) {
@@ -169,24 +177,23 @@ export const useRigStore = defineStore('rig', {
     },
 
     // --- outbound: UI calls these, they call wsSend ---
-    commandStimulus(pointId, value, send, source = 'manual') {
+    // Sets the level/state the rig drives OUT on an output channel (AO / DO).
+    setOutput(pointId, value, send, source = 'manual') {
       const point = this._findPoint(pointId)
       if (!point) return
       point.commandedValue = value
       point.source = source
-      // controllerValue must be re-entered by the tester against the new commanded value
+      // controllerValue is a dormant verification field; clear it on a new set.
       point.controllerValue = null
-      // For digital stimulus points, hmiValue mirrors commandedValue immediately
-      // (a contact either opens or closes — no slew time). This makes the lane
-      // and status badge update the instant the tester taps a command button
-      // rather than waiting up to 1200 ms for the next demo-simulator tick.
-      if (point.kind === 'digital' && point.role === 'stimulus') {
-        point.hmiValue = value
-      }
+      // Both analog and digital outputs mirror the set value to the read-back
+      // immediately so the lane and readout update the instant the tester acts,
+      // rather than waiting for the next telemetry/sim tick.
+      point.hmiValue = value
       this.recordSample(point)
       this._send(send, { type: 'io.command', payload: { id: pointId, value }, ts: Date.now() })
     },
 
+    // Dormant verification helper — manual "controller display" entry.
     setManualControllerValue(pointId, value, send) {
       const point = this._findPoint(pointId)
       if (!point) return
@@ -195,7 +202,8 @@ export const useRigStore = defineStore('rig', {
       this._send(send, { type: 'manual.entry', payload: { id: pointId, value, ts: Date.now() }, ts: Date.now() })
     },
 
-    confirmResponse(pointId, confirmed, send) {
+    // Dormant verification helper — manual confirm of a sensed relay.
+    confirmInput(pointId, confirmed, send) {
       const point = this._findPoint(pointId)
       if (!point) return
       point.confirmed = confirmed
@@ -210,7 +218,7 @@ export const useRigStore = defineStore('rig', {
       this.simulationOn = false
       for (const section of this.testPlan.sections) {
         for (const p of section.points) {
-          if (p.role === 'stimulus') p.commandedValue = null
+          if (p.role === 'output') { p.commandedValue = null; p.hmiValue = null }
         }
       }
       this._send(send, { type: 'sim.releaseAll', payload: null, ts: Date.now() })
@@ -220,8 +228,6 @@ export const useRigStore = defineStore('rig', {
     handleMessage(msg) {
       switch (msg.type) {
         case 'telemetry': {
-          // { id, hmiValue?, controllerValue?, confirmed? } — controller echo is
-          // rare (most panels can't be polled), so this is mostly hmiValue.
           const point = this._findPoint(msg.payload.id)
           if (point) {
             Object.assign(point, msg.payload)
@@ -230,8 +236,7 @@ export const useRigStore = defineStore('rig', {
           break
         }
         case 'io.commanded': {
-          // Hardware echo from ESP32 after applyCommand() settles — confirms the
-          // injected value actually landed on the wire (not just stored in Pinia).
+          // Hardware echo from ESP32 after the set value settles on the wire.
           const point = this._findPoint(msg.payload.id)
           if (point) point.commandedValue = msg.payload.value
           break
@@ -241,15 +246,15 @@ export const useRigStore = defineStore('rig', {
           this.alarms = this.alarms.slice(0, 50)
           break
         case 'testplan.set':
-          // Push from Node-RED (e.g. on io.list reconcile or future plan-upload endpoint).
-          // loadTestPlan() resets active section + selected point, then the rack reflows.
           this.loadTestPlan(msg.payload)
-          // Clear the demo history so the new plan doesn't start with stale seeded values.
           this.history = {}
           break
         case 'sim.status':
-          // Echoed from retained MQTT on every dashboard (re)connect — always authoritative.
           this.simulationOn = msg.payload.on
+          break
+        case 'verification.set':
+          // Future hook: Node-RED flips this on once RS485 to the UUT is live.
+          this.verificationEnabled = !!msg.payload.on
           break
         case 'test.status':
           Object.assign(this.testRun, msg.payload)
@@ -268,7 +273,6 @@ export const useRigStore = defineStore('rig', {
           this.storage = msg.payload
           break
         case 'pong':
-          // Heartbeat reply — no-op, connection is alive.
           break
         default:
           console.warn('[rig store] unhandled message type', msg.type)

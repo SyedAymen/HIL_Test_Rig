@@ -6,16 +6,17 @@ defineProps({
   sections: { type: Array, required: true },   // [{ id, label }] — any length
   activeSectionId: { type: String, required: true },
   simulationOn: { type: Boolean, required: true },
+  verificationEnabled: { type: Boolean, default: false },
   passPercent: { type: Number, default: 0 }
 })
-defineEmits(['select-section', 'toggle-simulation', 'release-all'])
+defineEmits(['select-section', 'toggle-simulation', 'release-all', 'export-snapshot'])
 </script>
 
 <template>
-  <header class="h-11 flex items-center justify-between px-4 border-b border-border bg-surface gap-4 overflow-x-auto">
+  <header class="h-14 flex items-center justify-between px-4 border-b border-border bg-surface gap-4 overflow-x-auto">
     <div class="flex items-center gap-5 shrink-0">
-      <span class="font-mono text-[9px] text-ttext-tertiary tracking-widest hidden lg:inline">HIL SIMULATION</span>
-      <nav class="flex items-center gap-4 font-mono text-xs">
+      <span class="font-mono text-xs text-ttext-tertiary tracking-widest hidden lg:inline">HIL SIMULATION</span>
+      <nav class="flex items-center gap-4 font-mono text-sm">
         <button
           v-for="s in sections" :key="s.id"
           class="uppercase pb-1 -mb-px whitespace-nowrap"
@@ -27,7 +28,7 @@ defineEmits(['select-section', 'toggle-simulation', 'release-all'])
 
     <div class="flex items-center gap-2 shrink-0">
       <button
-        class="h-6 px-2.5 rounded-full flex items-center gap-1.5 font-mono text-[9px] font-bold"
+        class="h-9 px-3 rounded-full flex items-center gap-1.5 font-mono text-xs font-bold"
         :class="simulationOn ? 'bg-success-soft text-success' : 'bg-sunken text-ttext-secondary'"
         @click="$emit('toggle-simulation')"
       >
@@ -39,17 +40,22 @@ defineEmits(['select-section', 'toggle-simulation', 'release-all'])
       </button>
 
       <button
-        class="h-6 px-2.5 rounded-lg border border-warning text-warning font-mono text-[9px] font-bold whitespace-nowrap"
+        class="h-9 px-3 rounded-lg border border-warning text-warning font-mono text-xs font-bold whitespace-nowrap"
         @click="$emit('release-all')"
-      >
-        Release All Outputs
-      </button>
+      >Release All Outputs</button>
+
+      <!-- one-click raw snapshot of every channel -->
+      <button
+        class="h-9 px-3 rounded-lg bg-primary text-white font-mono text-xs font-bold whitespace-nowrap"
+        @click="$emit('export-snapshot')"
+      >Export Snapshot</button>
 
       <ConnectionStatus :status="status" />
 
-      <span class="h-6 px-2.5 rounded-full bg-success-soft text-success font-mono text-[9px] font-bold flex items-center whitespace-nowrap">
-        {{ passPercent }}% Passed
-      </span>
+      <span
+        v-if="verificationEnabled"
+        class="h-9 px-3 rounded-full bg-success-soft text-success font-mono text-xs font-bold flex items-center whitespace-nowrap"
+      >{{ passPercent }}% Passed</span>
     </div>
   </header>
 </template>

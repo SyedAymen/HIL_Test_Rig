@@ -13,7 +13,7 @@ void DigitalInputs_init() {
                  String(DI_PINS[0]) + "," + String(DI_PINS[1]) + "," + String(DI_PINS[2]) + "," + String(DI_PINS[3]) + "," +
                  String(DI_PINS[4]) + "," + String(DI_PINS[5]) + "," + String(DI_PINS[6]) + "," + String(DI_PINS[7]));
   for (uint8_t i = 0; i < 8; i++) {
-    pinMode(DI_PINS[i], INPUT);
+    pinMode(DI_PINS[i], INPUT_PULLUP);
   }
   Debug_println("DigitalInputs: init OK");
 }

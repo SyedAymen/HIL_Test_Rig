@@ -4,15 +4,18 @@ import { computed } from 'vue'
 const props = defineProps({
   history: { type: Array, default: () => [] },
   min: { type: Number, default: 0 },
-  max: { type: Number, default: 100 },
-  target: { type: Number, default: null },       // commandedValue ?? acceptableValue
+  max: { type: Number, default: 10 },
+  target: { type: Number, default: null },       // commanded / acceptable — verification only
   tolerancePercent: { type: Number, default: 5 },
-  role: { type: String, default: 'stimulus' },     // controls whether the dashed "commanded" trace shows
-  statusColor: { type: String, default: '#4A5CFA' },
+  role: { type: String, default: 'output' },
+  traceColor: { type: String, default: '#4A5CFA' },
+  // When false, strips the shaded tolerance band and the dashed commanded
+  // overlay — the raw-voltage view used while verification is disabled.
+  showTarget: { type: Boolean, default: false },
   compact: { type: Boolean, default: false }
 })
 
-const H = 40 // fixed viewBox height in "chart units" — actual pixel height set by the container via CSS
+const H = 40 // fixed viewBox height in "chart units"
 
 function normalize(v) {
   if (v == null) return null
@@ -36,10 +39,12 @@ function pathFor(key) {
 }
 
 const hmiPath = computed(() => pathFor('hmiValue'))
-const commandedPath = computed(() => (props.role === 'stimulus' ? pathFor('commandedValue') : null))
+const commandedPath = computed(() =>
+  (props.showTarget && props.role === 'output') ? pathFor('commandedValue') : null
+)
 
 const band = computed(() => {
-  if (props.target == null) return null
+  if (!props.showTarget || props.target == null) return null
   const tol = Math.max(Math.abs(props.target) * (props.tolerancePercent / 100), 0.0001)
   const top = normalize(props.target + tol)
   const bottom = normalize(props.target - tol)
@@ -57,7 +62,7 @@ const lastPoint = computed(() => {
   <svg viewBox="0 0 100 40" preserveAspectRatio="none" class="w-full h-full">
     <rect v-if="band" x="0" :y="band.y" width="100" :height="band.height" fill="#1FB871" opacity="0.12" />
     <path v-if="commandedPath" :d="commandedPath" fill="none" stroke="#4A5CFA" stroke-width="1" stroke-dasharray="2 2" opacity="0.6" vector-effect="non-scaling-stroke" />
-    <path v-if="hmiPath" :d="hmiPath" fill="none" :stroke="statusColor" :stroke-width="compact ? 1.2 : 1.6" vector-effect="non-scaling-stroke" />
-    <circle v-if="lastPoint" :cx="lastPoint.x" :cy="lastPoint.y" r="1.8" :fill="statusColor" />
+    <path v-if="hmiPath" :d="hmiPath" fill="none" :stroke="traceColor" :stroke-width="compact ? 1.4 : 1.9" vector-effect="non-scaling-stroke" />
+    <circle v-if="lastPoint" :cx="lastPoint.x" :cy="lastPoint.y" r="2" :fill="traceColor" />
   </svg>
 </template>

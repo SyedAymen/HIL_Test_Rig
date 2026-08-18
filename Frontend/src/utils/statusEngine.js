@@ -1,6 +1,8 @@
 /**
- * Every point's status is derived, never stored as a raw flag someone could
- * set inconsistently. Feed it the point, get back one of:
+ * DORMANT while store.verificationEnabled is false (no RS485 link to the UUT
+ * yet, so nothing to compare against). Kept intact for the day verification is
+ * switched back on. Every point's status is derived, never stored as a raw flag
+ * someone could set inconsistently. Feed it the point, get back one of:
  *   'pending'          — not enough data yet to judge
  *   'awaiting-manual'  — HMI/telemetry side checks out, still waiting on the
  *                        tester's manual "Controller Display" entry
@@ -15,11 +17,11 @@ function withinTolerance(value, target, tolerancePercent) {
 
 export function computeStatus(point) {
   if (point.kind === 'digital') {
-    if (point.role === 'stimulus') {
+    if (point.role === 'output') {
       if (point.hmiValue == null) return 'pending'
       return point.hmiValue === point.commandedValue ? 'pass' : 'fail'
     }
-    // digital response (relay/DO) — no feedback contact assumed, needs a human to confirm
+    // digital input (sensed relay) — no feedback contact assumed, needs a human to confirm
     if (point.confirmed == null) return 'pending'
     return point.confirmed ? 'pass' : 'fail'
   }

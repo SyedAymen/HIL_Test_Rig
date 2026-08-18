@@ -3,7 +3,7 @@ import { computed } from 'vue'
 
 const props = defineProps({
   history: { type: Array, default: () => [] },
-  statusColor: { type: String, default: '#4A5CFA' },
+  traceColor: { type: String, default: '#4A5CFA' },
   compact: { type: Boolean, default: false }
 })
 
@@ -42,9 +42,9 @@ const lastState = computed(() => {
   <svg viewBox="0 0 100 40" preserveAspectRatio="none" class="w-full h-full">
     <line x1="0" :y1="HIGH" x2="100" :y2="HIGH" stroke="#ECEEF4" stroke-width="0.5" />
     <line x1="0" :y1="LOW" x2="100" :y2="LOW" stroke="#ECEEF4" stroke-width="0.5" />
-    <path v-if="stepPath" :d="stepPath" fill="none" :stroke="statusColor" :stroke-width="compact ? 1.4 : 1.8" vector-effect="non-scaling-stroke" />
+    <path v-if="stepPath" :d="stepPath" fill="none" :stroke="traceColor" :stroke-width="compact ? 1.4 : 1.8" vector-effect="non-scaling-stroke" />
     <text v-if="!compact" x="1" y="7" font-size="5" fill="#BBBFCF" font-family="monospace">1</text>
     <text v-if="!compact" x="1" y="37" font-size="5" fill="#BBBFCF" font-family="monospace">0</text>
-    <circle v-if="lastState !== null" cx="100" :cy="yFor(lastState)" r="1.8" :fill="statusColor" />
+    <circle v-if="lastState !== null" cx="100" :cy="yFor(lastState)" r="1.8" :fill="traceColor" />
   </svg>
 </template>

@@ -3,8 +3,13 @@ import { onMounted, onBeforeUnmount } from 'vue'
 /**
  * DEMO ONLY. In production this whole file goes away — Node-RED pushes
  * `telemetry` messages over the real WebSocket instead. This exists so the
- * signal rack and transfer plot have live, causally-related data to render
- * while developing against the template without hardware attached.
+ * signal rack has live, moving data to render while developing without hardware.
+ *
+ * Direction model matches the rig:
+ *   output channels (AO/DO) — settle toward whatever the rig is driving out
+ *   input channels  (AI/DI) — wander like a real sensed line, proving the
+ *                             channel is alive/noisy (there is no UUT link to
+ *                             derive a "correct" value from yet)
  */
 export function useDemoSimulator(rig, { intervalMs = 1200, enabled = true } = {}) {
   let timer = null
@@ -13,47 +18,37 @@ export function useDemoSimulator(rig, { intervalMs = 1200, enabled = true } = {}
     return rig.testPlan.sections.flatMap((s) => s.points)
   }
 
-  function drivingStimulusFor(responseId) {
-    return rig.drivingStimulusFor(responseId)
+  function round(v) {
+    return Math.round(v * 100) / 100
   }
 
   function step(point) {
     if (point.kind === 'digital') {
-      if (point.role === 'stimulus' && point.commandedValue != null) {
-        // Digital contacts switch instantly — no slew rate, no random delay.
-        // Always mirror commandedValue → hmiValue so the lane and status
-        // update the moment the tester taps a command button.
+      if (point.role === 'output' && point.commandedValue != null) {
+        // Digital outputs switch instantly — mirror commanded → sensed read-back.
         point.hmiValue = point.commandedValue
       }
+      // Digital inputs hold their sensed field state steady in the demo.
       rig.recordSample(point)
       return
     }
 
     const min = point.min ?? 0
-    const max = point.max ?? 100
+    const max = point.max ?? 10
     const noise = () => (Math.random() - 0.5) * (max - min) * 0.006
 
-    if (point.role === 'stimulus') {
-      const target = point.commandedValue ?? point.hmiValue ?? (min + max) / 2
+    if (point.role === 'output') {
+      // Track the voltage the rig is driving out, with a touch of wire noise.
+      const target = point.commandedValue ?? point.hmiValue ?? 0
       const current = point.hmiValue ?? target
-      point.hmiValue = round(current + (target - current) * 0.35 + noise())
+      point.hmiValue = round(Math.min(max, Math.max(min, current + (target - current) * 0.4 + noise())))
     } else {
-      // response: drift toward whatever its driving stimulus implies, mapped into this point's own range
-      const driver = drivingStimulusFor(point.id)
-      let target = point.hmiValue ?? (min + max) / 2
-      if (driver && driver.commandedValue != null) {
-        const driverSpan = (driver.max ?? 100) - (driver.min ?? 0)
-        const ratio = driverSpan ? (driver.commandedValue - (driver.min ?? 0)) / driverSpan : 0
-        target = min + ratio * (max - min)
-      }
-      const current = point.hmiValue ?? target
-      point.hmiValue = round(current + (target - current) * 0.25 + noise())
+      // Input: bounded random walk so the live monitor line visibly moves.
+      const current = point.hmiValue ?? (min + max) / 2
+      const drift = (Math.random() - 0.5) * (max - min) * 0.03
+      point.hmiValue = round(Math.min(max, Math.max(min, current + drift)))
     }
     rig.recordSample(point)
-  }
-
-  function round(v) {
-    return Math.round(v * 10) / 10
   }
 
   function tick() {

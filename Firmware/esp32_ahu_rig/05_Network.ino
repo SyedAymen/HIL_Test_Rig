@@ -3,37 +3,89 @@
 /*
   05_Network.ino
   --------------
-  Ethernet is the intended production transport (see the board header
-  comment), but during bench bring-up you don't always have it plugged
-  in. This module tries Ethernet first; if the W5500 isn't detected, or
-  the link is down (no cable), it automatically brings up WiFi instead
-  and rebinds the shared PubSubClient to a WiFiClient so MQTT keeps
-  working over whichever transport is actually available.
+  Uses the NATIVE ESP32 ETH stack (ETH.h + W5500) instead of the
+  third-party Ethernet.h library. The native stack is event-driven:
+  WiFi.onEvent() / NetworkEvent() below handles all link and IP
+  state changes asynchronously.
 
-  Network_selectTransport() is called from Mqtt_maintainConnection()
-  every time a reconnect is about to be attempted (throttled to once per
-  2s while disconnected — see 06_Mqtt.ino), so this also acts as ongoing
-  failover: pull the Ethernet cable mid-run, and the next reconnect
-  attempt after MQTT notices the connection died will pick up WiFi
-  automatically. Plug Ethernet back in, and it switches back the same way
-  (Ethernet is always preferred when its link is up).
+  Key differences from the old Ethernet.h approach:
+    - No MAC[] byte array — the native stack reads the ESP32's
+      hardware-fused OTP MAC automatically.
+    - SPIClass ethSPI(FSPI) is used instead of the default SPI object
+      so the W5500 SPI bus is explicitly controlled.
+    - ETH.begin() replaces Ethernet.begin().
+    - ETH.config() replaces Ethernet.begin(mac, ip, dns, gw, subnet).
+    - Link/IP status is tracked via the eth_connected flag set by
+      NetworkEvent(), not by polling Ethernet.hardwareStatus() /
+      Ethernet.linkStatus().
+    - Both Ethernet and WiFi transports use WiFiClient (ethClient)
+      because the native stack unifies all sockets under lwIP.
+
+  WiFi fallback behaviour is unchanged: if ETH link is not up when
+  Network_selectTransport() is called, WiFi is brought up and MQTT
+  runs over that instead. Ethernet is always preferred when its link
+  is up.
 */
 
-enum NetworkTransport { TRANSPORT_NONE, TRANSPORT_ETHERNET, TRANSPORT_WIFI };
-NetworkTransport activeTransport = TRANSPORT_NONE;
-WiFiClient wifiClientObj;
+// ---------------------------------------------------------------------------
+// Module-private state
+// ---------------------------------------------------------------------------
+static bool eth_connected = false;
+SPIClass ethSPI(FSPI);
 
+enum NetworkTransport { TRANSPORT_NONE, TRANSPORT_ETHERNET, TRANSPORT_WIFI };
+static NetworkTransport activeTransport = TRANSPORT_NONE;
+
+// ---------------------------------------------------------------------------
+// Native ETH event handler
+// ---------------------------------------------------------------------------
+void NetworkEvent(WiFiEvent_t event) {
+  switch (event) {
+    case ARDUINO_EVENT_ETH_START:
+      Debug_println("Network: ETH stack started");
+      ETH.setHostname("esp32-ahu-rig");
+      break;
+
+    case ARDUINO_EVENT_ETH_CONNECTED:
+      Debug_println("Network: Ethernet cable linked — waiting for IP...");
+      break;
+
+    case ARDUINO_EVENT_ETH_GOT_IP:
+      Serial.print("Network: Ethernet MAC : ");
+      Serial.println(ETH.macAddress());
+      Serial.print("Network: Ethernet IP  : ");
+      Serial.println(ETH.localIP());
+      eth_connected = true;
+      break;
+
+    case ARDUINO_EVENT_ETH_DISCONNECTED:
+      Debug_println("Network: Ethernet link disconnected");
+      eth_connected = false;
+      break;
+
+    case ARDUINO_EVENT_ETH_STOP:
+      Debug_println("Network: ETH driver stopped");
+      eth_connected = false;
+      break;
+
+    default:
+      break;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Transport helpers — called by Network_selectTransport()
+// ---------------------------------------------------------------------------
 bool Network_ethernetLinkUp() {
-  if (Ethernet.hardwareStatus() == EthernetNoHardware) return false;
-  // W5500 supports real link detection (cable plugged in AND link
-  // negotiated), so LinkOFF here is trustworthy, not just "unsupported".
-  return Ethernet.linkStatus() != LinkOFF;
+  return eth_connected;
 }
 
 void Network_useEthernet() {
   if (activeTransport == TRANSPORT_ETHERNET) return;
-  Debug_println("Network: switching MQTT transport -> ETHERNET");
+  Debug_println("Network: switching MQTT transport -> ETHERNET (broker 192.168.2.1)");
   mqtt.disconnect();
+  MQTT_BROKER = MQTT_BROKER_ETH;   // Pi eth0 subnet
+  mqtt.setServer(MQTT_BROKER, MQTT_PORT);
   mqtt.setClient(ethClient);
   activeTransport = TRANSPORT_ETHERNET;
 }
@@ -51,20 +103,22 @@ void Network_useWifi() {
     }
     if (WiFi.status() != WL_CONNECTED) {
       Debug_errorln("Network: WiFi fallback failed to connect within 10s — check WIFI_SSID/WIFI_PASSWORD in 00_Config.ino");
-      return;  // leaves activeTransport as-is; caller's mqtt.connect() will just fail and retry in 2s
+      return;
     }
     Serial.print("Network: WiFi connected, IP = ");
     Serial.println(WiFi.localIP());
   }
 
-  Debug_println("Network: switching MQTT transport -> WIFI");
+  Debug_println("Network: switching MQTT transport -> WIFI (broker 192.168.4.1)");
   mqtt.disconnect();
-  mqtt.setClient(wifiClientObj);
+  MQTT_BROKER = MQTT_BROKER_WIFI;  // Pi wlan0 subnet
+  mqtt.setServer(MQTT_BROKER, MQTT_PORT);
+  mqtt.setClient(ethClient);   // same WiFiClient object works for WiFi too
   activeTransport = TRANSPORT_WIFI;
 }
 
-// Re-evaluated before every MQTT reconnect attempt — Ethernet is always
-// preferred when its link is up, WiFi is the fallback otherwise.
+// Re-evaluated before every MQTT reconnect attempt.
+// Ethernet is always preferred; WiFi is the automatic fallback.
 void Network_selectTransport() {
   if (Network_ethernetLinkUp()) {
     Network_useEthernet();
@@ -73,32 +127,47 @@ void Network_selectTransport() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Network_init  — called once from setup()
+// ---------------------------------------------------------------------------
 void Network_init() {
-  Debug_printf("Network: starting SPI (SCLK=%d MISO=%d MOSI=%d CS=%d)...\n",
-               ETH_SCLK_PIN, ETH_MISO_PIN, ETH_MOSI_PIN, ETH_CS_PIN);
-  SPI.begin(ETH_SCLK_PIN, ETH_MISO_PIN, ETH_MOSI_PIN, ETH_CS_PIN);
-  Ethernet.init(ETH_CS_PIN);
+  Debug_printf("Network: registering ETH events, SPI pins SCLK=%d MISO=%d MOSI=%d CS=%d INT=%d\n",
+               ETH_SCLK_PIN, ETH_MISO_PIN, ETH_MOSI_PIN, ETH_CS_PIN, ETH_INT_PIN);
 
-  Debug_println("Network: starting W5500 (Ethernet.begin)...");
-  Ethernet.begin(MAC, STATIC_IP, DNS_SERVER, GATEWAY, SUBNET);
-  delay(1000);
+  // Register event handler BEFORE ETH.begin() so we don't miss any events
+  WiFi.onEvent(NetworkEvent);
 
-  if (Ethernet.hardwareStatus() == EthernetNoHardware) {
-    Debug_errorln("Network: W5500 not found (check wiring/SPI pins) — will use WiFi fallback for MQTT");
+  // Initialise the FSPI bus on the board's confirmed W5500 pins
+  ethSPI.begin(ETH_SCLK_PIN, ETH_MISO_PIN, ETH_MOSI_PIN, ETH_CS_PIN);
+
+  // Start the native W5500 driver
+  if (!ETH.begin(ETH_PHY_W5500, 1, ETH_CS_PIN, ETH_INT_PIN, -1, ethSPI)) {
+    Debug_errorln("Network: native W5500 init FAILED (check SPI wiring) — will use WiFi fallback");
   } else {
-    Debug_println("Network: W5500 hardware detected OK");
-    Serial.print("Network: Ethernet IP = ");
-    Serial.println(Ethernet.localIP());
+    Debug_println("Network: W5500 hardware init OK — applying static IP config...");
+    // Apply static IP — must be called after ETH.begin(), before the stack
+    // issues a DHCP request (config() with no DHCP server arg disables DHCP).
+    ETH.config(STATIC_IP, GATEWAY, SUBNET, DNS_SERVER);
   }
 
-  Network_selectTransport();  // picks Ethernet now if the link's up, otherwise brings up WiFi immediately
+  // Wait up to 5 s for ARDUINO_EVENT_ETH_GOT_IP before falling back to WiFi.
+  // NetworkEvent() sets eth_connected when the IP is confirmed.
+  Debug_println("Network: waiting up to 5 s for ETH link + IP...");
+  unsigned long wait_start = millis();
+  while (!eth_connected && millis() - wait_start < 5000) {
+    delay(100);
+  }
+
+  Network_selectTransport();
   Debug_println(activeTransport == TRANSPORT_ETHERNET ? "Network: active transport = ETHERNET" :
-                activeTransport == TRANSPORT_WIFI      ? "Network: active transport = WIFI" :
+                activeTransport == TRANSPORT_WIFI      ? "Network: active transport = WIFI"     :
                                                           "Network: no transport available yet");
 }
 
+// ---------------------------------------------------------------------------
+// Network_maintain  — called every loop()
+// ---------------------------------------------------------------------------
 void Network_maintain() {
-  if (Ethernet.hardwareStatus() != EthernetNoHardware) {
-    Ethernet.maintain();
-  }
+  // The native ETH stack is fully event-driven; no explicit polling is needed.
+  // This function is kept for API compatibility with esp32_ahu_rig.ino loop().
 }

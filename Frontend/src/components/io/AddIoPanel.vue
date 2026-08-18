@@ -1,37 +1,46 @@
 <script setup>
-import { reactive } from 'vue'
+import { reactive, watch } from 'vue'
 
+const props = defineProps({
+  sectionId: { type: String, default: 'AO' } // AO | AI | DO | DI — seeds sensible defaults
+})
 const emit = defineEmits(['save', 'cancel'])
+
+// Derive direction + kind from the active section so the form starts correct.
+function defaultsFor(sectionId) {
+  return {
+    role: sectionId === 'AO' || sectionId === 'DO' ? 'output' : 'input',
+    kind: sectionId === 'AO' || sectionId === 'AI' ? 'analog' : 'digital'
+  }
+}
 
 const form = reactive({
   id: '',
   terminal: '',
-  role: 'stimulus',
-  kind: 'analog',
-  unit: '',
+  ...defaultsFor(props.sectionId),
   min: 0,
-  max: 100,
-  acceptableValue: null
+  max: 10
 })
+
+watch(() => props.sectionId, (id) => Object.assign(form, defaultsFor(id)))
 
 function submit() {
   if (!form.id.trim() || !form.terminal.trim()) return
+  const isAnalog = form.kind === 'analog'
   const point = {
     id: form.id.trim(),
     terminal: form.terminal.trim(),
     label: form.id.trim(),
     role: form.role,
     kind: form.kind,
-    unit: form.kind === 'analog' ? form.unit : null,
-    min: form.kind === 'analog' ? form.min : null,
-    max: form.kind === 'analog' ? form.max : null,
-    acceptableValue: form.kind === 'analog' ? form.acceptableValue : null,
-    tolerancePercent: 5,
+    unit: isAnalog ? 'V' : null,
+    min: isAnalog ? form.min : null,
+    max: isAnalog ? form.max : null,
     commandedValue: null,
     controllerValue: null,
     hmiValue: null,
-    confirmed: form.kind === 'digital' && form.role === 'response' ? null : undefined,
-    source: form.role === 'stimulus' ? 'manual' : null,
+    confirmed: form.kind === 'digital' && form.role === 'input' ? null : undefined,
+    source: form.role === 'output' ? 'manual' : null,
     relatedPoints: []
   }
   emit('save', point)
@@ -39,60 +48,57 @@ function submit() {
 </script>
 
 <template>
-  <div class="panel-card p-4 border-primary/40">
-    <p class="text-sm font-semibold mb-4">Add I/O point</p>
+  <div class="panel-card p-5 border-primary/40">
+    <p class="text-base font-semibold mb-4">Add channel</p>
 
     <div class="grid grid-cols-2 gap-2 mb-2">
       <button
-        class="h-8 rounded-lg text-xs font-medium border"
-        :class="form.role === 'stimulus' ? 'bg-primary text-white border-primary' : 'border-border text-ttext-secondary'"
-        @click="form.role = 'stimulus'"
-      >Stimulus (rig → UUT)</button>
+        class="h-11 rounded-xl text-sm font-medium border-2"
+        :class="form.role === 'output' ? 'bg-primary text-white border-primary' : 'border-border text-ttext-secondary'"
+        @click="form.role = 'output'"
+      >Output (rig drives)</button>
       <button
-        class="h-8 rounded-lg text-xs font-medium border"
-        :class="form.role === 'response' ? 'bg-copper text-white border-copper' : 'border-border text-ttext-secondary'"
-        @click="form.role = 'response'"
-      >Response (UUT → rig)</button>
+        class="h-11 rounded-xl text-sm font-medium border-2"
+        :class="form.role === 'input' ? 'bg-copper text-white border-copper' : 'border-border text-ttext-secondary'"
+        @click="form.role = 'input'"
+      >Input (rig senses)</button>
     </div>
 
     <div class="grid grid-cols-2 gap-2 mb-2">
       <button
-        class="h-8 rounded-lg text-xs font-medium border"
+        class="h-11 rounded-xl text-sm font-medium border-2"
         :class="form.kind === 'analog' ? 'bg-sunken border-borderstrong font-semibold' : 'border-border text-ttext-secondary'"
         @click="form.kind = 'analog'"
-      >Analog</button>
+      >Analog (0–10 V)</button>
       <button
-        class="h-8 rounded-lg text-xs font-medium border"
+        class="h-11 rounded-xl text-sm font-medium border-2"
         :class="form.kind === 'digital' ? 'bg-sunken border-borderstrong font-semibold' : 'border-border text-ttext-secondary'"
         @click="form.kind = 'digital'"
-      >Digital</button>
+      >Digital (ON/OFF)</button>
     </div>
 
     <div class="grid grid-cols-2 gap-2 mb-2">
-      <input v-model="form.id" type="text" placeholder="ID — e.g. RM5-TEMP"
-        class="h-9 px-3 rounded-lg border border-border text-sm bg-surfacealt" />
+      <input v-model="form.id" type="text" placeholder="Channel ID — e.g. AO-20"
+        class="h-11 px-3 rounded-xl border-2 border-border text-base bg-surfacealt" />
       <input v-model="form.terminal" type="text" placeholder="Terminal — e.g. E3U2"
-        class="h-9 px-3 rounded-lg border border-border text-sm bg-surfacealt" />
+        class="h-11 px-3 rounded-xl border-2 border-border text-base bg-surfacealt" />
     </div>
 
-    <div v-if="form.kind === 'analog'" class="grid grid-cols-3 gap-2 mb-3">
-      <input v-model="form.unit" type="text" placeholder="Unit"
-        class="h-9 px-2 rounded-lg border border-border text-sm bg-surfacealt" />
-      <input v-model.number="form.min" type="number" placeholder="Min"
-        class="h-9 px-2 rounded-lg border border-border text-sm bg-surfacealt" />
-      <input v-model.number="form.max" type="number" placeholder="Max"
-        class="h-9 px-2 rounded-lg border border-border text-sm bg-surfacealt" />
+    <div v-if="form.kind === 'analog'" class="grid grid-cols-2 gap-2 mb-3">
+      <input v-model.number="form.min" type="number" placeholder="Min V"
+        class="h-11 px-3 rounded-xl border-2 border-border text-base bg-surfacealt" />
+      <input v-model.number="form.max" type="number" placeholder="Max V"
+        class="h-11 px-3 rounded-xl border-2 border-border text-base bg-surfacealt" />
     </div>
-    <input v-else-if="form.role === 'stimulus'" type="text" placeholder="(digital stimulus — commanded via toggle, no extra fields)"
-      disabled class="w-full h-9 px-3 mb-3 rounded-lg border border-dashed border-border text-xs text-ttext-tertiary bg-surfacealt" />
-    <input v-else type="text" placeholder="(digital response — confirmed manually, no extra fields)"
-      disabled class="w-full h-9 px-3 mb-3 rounded-lg border border-dashed border-border text-xs text-ttext-tertiary bg-surfacealt" />
+    <p v-else class="text-sm text-ttext-tertiary mb-3 px-1">
+      {{ form.role === 'output' ? 'Digital output — driven via the ON/OFF button.' : 'Digital input — sensed, read-only.' }}
+    </p>
 
     <div class="flex gap-2">
-      <button class="flex-1 h-9 rounded-lg bg-primary text-white text-sm font-medium" @click="submit">
+      <button class="flex-1 h-11 rounded-xl bg-primary text-white text-base font-medium" @click="submit">
         Save &amp; wire to gateway
       </button>
-      <button class="h-9 px-4 rounded-lg border border-borderstrong text-sm" @click="emit('cancel')">
+      <button class="h-11 px-4 rounded-xl border-2 border-borderstrong text-base" @click="emit('cancel')">
         Cancel
       </button>
     </div>

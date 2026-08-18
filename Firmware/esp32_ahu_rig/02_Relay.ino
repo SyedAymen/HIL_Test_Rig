@@ -20,17 +20,21 @@ bool Relay_writeReg(uint8_t reg, uint8_t val) {
 }
 
 void Relay_init() {
-  Debug_println("Relay: starting TCA9554 init (I2C SDA=" + String(I2C_SDA_PIN) + " SCL=" + String(I2C_SCL_PIN) + ")...");
+  Debug_println("Relay: starting TCA9554 init...");
   Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);
-  bool cfgOk = Relay_writeReg(TCA9554_REG_CONFIG, 0x00);   // all 8 bits = output (relay control)
-  bool outOk = Relay_writeReg(TCA9554_REG_OUTPUT, relayShadow);  // all relays off at boot
+  
+  // 1. SET OUTPUT STATES FIRST (to prevent relay glitches)
+  bool outOk = Relay_writeReg(TCA9554_REG_OUTPUT, relayShadow); 
+  
+  // 2. THEN SET PIN DIRECTION TO OUTPUT
+  bool cfgOk = Relay_writeReg(TCA9554_REG_CONFIG, 0x00);   
+
   if (cfgOk && outOk) {
     Debug_println("Relay: TCA9554 init OK, all 8 relays OFF");
   } else {
-    Debug_errorln("Relay: TCA9554 init FAILED — relays will not respond. Check I2C wiring and TCA9554_ADDR.");
+    Debug_errorln("Relay: TCA9554 init FAILED...");
   }
 }
-
 void Relay_set(uint8_t bit, bool on) {
   if (bit > 7) {
     Debug_errorf("Relay: ignoring Relay_set() with out-of-range bit %u (must be 0-7)\n", bit);

@@ -96,7 +96,7 @@ export function createSequenceEngine(rig, wsSend) {
       pushStatus({ progress: Math.round((i / total) * 100) })
 
       if (step.type === 'command') {
-        rig.commandStimulus(step.point, step.value, wsSend, `sequence:${sequence.label}`)
+        rig.setOutput(step.point, step.value, wsSend, `sequence:${sequence.label}`)
         log('info', step.title)
         pushStep(step, 'done')
       } else if (step.type === 'wait') {
