@@ -9,18 +9,24 @@ import OutputSpotlight from '../components/spotlight/OutputSpotlight.vue'
 import InputSpotlight from '../components/spotlight/InputSpotlight.vue'
 import TestRunnerPanel from '../components/automation/TestRunnerPanel.vue'
 import AlertPanel from '../components/alerts/AlertPanel.vue'
+import BmsView from './BmsView.vue'
 
 const rig = useRigStore()
 const wsSend = inject('wsSend')
 
 const panelMode = ref('spotlight') // 'spotlight' | 'add' | 'automation'
+const bmsActive = ref(false)       // BMS tab shows the Carel Modbus view
 
 const activePoints = computed(() => rig.pointsInSection(rig.activeSectionId))
 const activeSection = computed(() => rig.activeSection)
 
 function onSelectSection(id) {
+  bmsActive.value = false
   rig.selectSection(id)
   panelMode.value = 'spotlight'
+}
+function onSelectBms() {
+  bmsActive.value = true
 }
 function onSelectPoint(id) {
   rig.selectPoint(id)
@@ -49,16 +55,23 @@ watch(() => rig.testRun.waitingManual, (w) => {
       :status="rig.connectionStatus"
       :sections="rig.sections"
       :active-section-id="rig.activeSectionId"
+      :bms-active="bmsActive"
       :simulation-on="rig.simulationOn"
       :verification-enabled="rig.verificationEnabled"
       :pass-percent="rig.overallSummary.percent"
       @select-section="onSelectSection"
+      @select-bms="onSelectBms"
       @toggle-simulation="rig.toggleSimulation(wsSend)"
       @release-all="rig.releaseAllOutputs(wsSend)"
       @export-snapshot="onExportSnapshot"
     />
 
-    <main class="flex-1 min-h-0 grid grid-cols-12 grid-rows-[minmax(0,1fr)] gap-3 p-3 overflow-hidden">
+    <!-- BMS tab: full-width Carel Modbus monitoring -->
+    <main v-if="bmsActive" class="flex-1 min-h-0 p-3 overflow-hidden">
+      <BmsView />
+    </main>
+
+    <main v-else class="flex-1 min-h-0 grid grid-cols-12 grid-rows-[minmax(0,1fr)] gap-3 p-3 overflow-hidden">
       <!-- signal rack: stacked lanes, grouped by module -->
       <div class="col-span-12 lg:col-span-7 min-h-0 h-full overflow-hidden">
         <SignalRack :points="activePoints" :selected-id="rig.selectedPointId" @select="onSelectPoint" @remove="onRemovePoint" />
@@ -98,9 +111,16 @@ watch(() => rig.testRun.waitingManual, (w) => {
 
     <!-- footer: channel counts only (no pass/fail while verification is disabled) -->
     <footer class="h-11 flex items-center gap-6 px-4 border-t border-border bg-surface font-mono text-sm">
-      <span>{{ rig.activeSectionId }} · <b>{{ activeSection?.label }}</b></span>
-      <span class="text-ttext-secondary">{{ activePoints.length }} channels</span>
-      <span class="text-ttext-tertiary hidden sm:inline">Voltages are raw 0–10 V · verification disabled (no UUT link)</span>
+      <template v-if="bmsActive">
+        <span>BMS · <b>Carel Controller</b></span>
+        <span class="text-ttext-secondary">{{ rig.bmsMap.points.length }} registers</span>
+        <span class="text-ttext-tertiary hidden sm:inline">Modbus RTU over RS485 · live from the controller</span>
+      </template>
+      <template v-else>
+        <span>{{ rig.activeSectionId }} · <b>{{ activeSection?.label }}</b></span>
+        <span class="text-ttext-secondary">{{ activePoints.length }} channels</span>
+        <span class="text-ttext-tertiary hidden sm:inline">Voltages are raw 0–10 V · verification disabled (no UUT link)</span>
+      </template>
     </footer>
   </div>
 </template>

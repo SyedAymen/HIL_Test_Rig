@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { seedTestPlan } from '../data/seedTestPlan'
 import { computeStatus } from '../utils/statusEngine'
+import { carelBmsMap, carelIdSet } from '../data/carelBmsMap'
 
 const MAX_SAMPLES = 60
 
@@ -10,6 +11,12 @@ export const useRigStore = defineStore('rig', {
   const firstSection = seededPlan.sections[0]
   return ({
     connectionStatus: 'connecting',
+
+    // Carel controller BMS data (rides the standard telemetry pipeline; ids are
+    // the CAREL-* firmware point ids). Values arrive already in engineering units.
+    bmsMap: carelBmsMap,
+    bmsValues: {},       // { [id]: number | boolean }
+    bmsLastUpdate: 0,    // ms epoch of the most recent CAREL-* telemetry
     // Default false — Node-RED will push the real retained value via sim.status on
     // every dashboard (re)connect, so we don't want an optimistic 'true' here.
     simulationOn: false,
@@ -41,6 +48,20 @@ export const useRigStore = defineStore('rig', {
     sections: (state) => state.testPlan.sections,
 
     activeSection: (state) => state.testPlan.sections.find((s) => s.id === state.activeSectionId) || null,
+
+    // Carel BMS points grouped for the BMS tab, each with its live value attached.
+    bmsGroups: (state) => {
+      const order = ['Primary', 'Outputs', 'Temperatures', 'Fan Bank', 'Status', 'Commands', 'Setpoints']
+      const byGroup = {}
+      for (const p of state.bmsMap.points) {
+        ;(byGroup[p.group] ??= []).push({ ...p, value: state.bmsValues[p.id] })
+      }
+      return order
+        .filter((name) => byGroup[name])
+        .map((name) => ({ name, points: byGroup[name] }))
+    },
+    // True when we've never received Carel data, or it stopped ~>4s ago.
+    bmsStale: (state) => !state.bmsLastUpdate || Date.now() - state.bmsLastUpdate > 4000,
 
     pointsInSection: (state) => (sectionId) => {
       const section = state.testPlan.sections.find((s) => s.id === sectionId)
@@ -193,6 +214,14 @@ export const useRigStore = defineStore('rig', {
       this._send(send, { type: 'io.command', payload: { id: pointId, value }, ts: Date.now() })
     },
 
+    // Writes a Carel setpoint (holding register) or command (coil). Carel points
+    // use the SAME io.command topic as rig outputs — the firmware routes by id.
+    // value is engineering units for analog, boolean for digital.
+    sendBmsCommand(id, value, send) {
+      this.bmsValues[id] = value   // optimistic; the next poll / ack confirms
+      this._send(send, { type: 'io.command', payload: { id, value }, ts: Date.now() })
+    },
+
     // Dormant verification helper — manual "controller display" entry.
     setManualControllerValue(pointId, value, send) {
       const point = this._findPoint(pointId)
@@ -228,6 +257,13 @@ export const useRigStore = defineStore('rig', {
     handleMessage(msg) {
       switch (msg.type) {
         case 'telemetry': {
+          // Carel BMS points ride the same telemetry topic but aren't in the
+          // rig test plan — route them to the BMS map instead of a rack point.
+          if (carelIdSet.has(msg.payload.id)) {
+            this.bmsValues[msg.payload.id] = msg.payload.hmiValue
+            this.bmsLastUpdate = Date.now()
+            break
+          }
           const point = this._findPoint(msg.payload.id)
           if (point) {
             Object.assign(point, msg.payload)
@@ -237,6 +273,10 @@ export const useRigStore = defineStore('rig', {
         }
         case 'io.commanded': {
           // Hardware echo from ESP32 after the set value settles on the wire.
+          if (carelIdSet.has(msg.payload.id)) {
+            this.bmsValues[msg.payload.id] = msg.payload.value
+            break
+          }
           const point = this._findPoint(msg.payload.id)
           if (point) point.commandedValue = msg.payload.value
           break
