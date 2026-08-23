@@ -53,16 +53,18 @@
 // ---------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------
-enum IoKind { LOCAL_RELAY, LOCAL_DI, MODBUS_AI, MODBUS_AO };
+enum IoKind { LOCAL_RELAY, LOCAL_DI, MODBUS_AI, MODBUS_AO,
+              CAREL_INPUT_REG, CAREL_HOLDING_REG, CAREL_COIL, CAREL_DISCRETE_IN };
 
 struct RigPoint {
   const char* pointId;      // matches testPlan point.id, e.g. "DPT-1", "EC-FAN"
   IoKind kind;
   uint8_t localPin;         // used only for LOCAL_DI
   uint8_t relayBit;         // used only for LOCAL_RELAY (TCA9554 output bit 0-7)
-  uint8_t modbusSlaveAddr;  // used only for MODBUS_AI / MODBUS_AO
-  uint8_t modbusChannel;    // used only for MODBUS_AI / MODBUS_AO (0-7)
-  uint16_t lastModbusValue; // runtime cache for MODBUS_AI, filled by Modbus_pollAiModules()
+  uint8_t modbusSlaveAddr;  // used for MODBUS_AI/AO (Waveshare) and CAREL_* (= CAREL_SLAVE_ADDR)
+  uint16_t modbusChannel;   // MODBUS_AI/AO: 0-7 channel. CAREL_*: absolute register/coil INDEX per the BMS sheet
+  uint16_t lastModbusValue; // runtime cache — raw register value, or 0/1 for coil/discrete input
+  float carelScale;         // CAREL_* only: raw register / carelScale = engineering value. UNVERIFIED — see 08_CarelModbus.ino header
 };
 
 // ---------------------------------------------------------------------
@@ -83,6 +85,7 @@ extern const uint8_t DI_PINS[8];
 extern const unsigned long RS485_BAUD;
 extern const unsigned long MODBUS_POLL_TIMEOUT_MS;
 extern bool MODBUS_MODULES_PRESENT;  // set true once your AI/AO expansion modules are wired up
+extern const uint8_t CAREL_SLAVE_ADDR;
 
 // WiFi is the FALLBACK transport for MQTT if Ethernet isn't usable (no
 // cable, no W5500 detected) — see 05_Network.ino. Not used for OTA in
@@ -130,6 +133,13 @@ void Modbus_init();
 void Modbus_pollAiModule(uint8_t slaveAddr);
 void Modbus_pollAiModules();
 bool Modbus_writeAo(uint8_t slaveAddr, uint8_t channel, uint16_t value);
+
+void Carel_pollInputRegisters();
+void Carel_pollHoldingRegisters();
+void Carel_pollCoils();
+void Carel_pollDiscreteInputs();
+bool Carel_writeHoldingRegister(uint16_t regIndex, uint16_t rawValue);
+bool Carel_writeCoil(uint16_t coilIndex, bool state);
 
 void Network_init();
 void Network_maintain();

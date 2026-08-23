@@ -17,7 +17,7 @@ RigPoint* Points_find(const String& pointId) {
 }
 
 bool Points_isStimulusKind(IoKind k) {
-  return k == LOCAL_RELAY || k == MODBUS_AO;
+  return k == LOCAL_RELAY || k == MODBUS_AO || k == CAREL_COIL || k == CAREL_HOLDING_REG;
 }
 
 void Points_applyCommand(RigPoint& pt, float value) {
@@ -32,8 +32,19 @@ void Points_applyCommand(RigPoint& pt, float value) {
       Modbus_writeAo(pt.modbusSlaveAddr, pt.modbusChannel, regVal);
       break;
     }
+    case CAREL_COIL:
+      Debug_printf("Points: %s -> CAREL_COIL idx %u\n", pt.pointId, pt.modbusChannel);
+      Carel_writeCoil(pt.modbusChannel, value > 0.5);
+      break;
+    case CAREL_HOLDING_REG: {
+      // carelScale UNVERIFIED — see 08_CarelModbus.ino header
+      uint16_t regVal = (uint16_t)constrain((long)(value * pt.carelScale), 0, 65535);
+      Debug_printf("Points: %s -> CAREL_HOLDING_REG idx %u = %u raw\n", pt.pointId, pt.modbusChannel, regVal);
+      Carel_writeHoldingRegister(pt.modbusChannel, regVal);
+      break;
+    }
     default:
-      Debug_errorf("Points: ignoring command for '%s' — it's response-only (LOCAL_DI/MODBUS_AI), not a stimulus point\n", pt.pointId);
+      Debug_errorf("Points: ignoring command for '%s' — it's response-only, not a stimulus point\n", pt.pointId);
       break;
   }
 }

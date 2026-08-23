@@ -106,7 +106,7 @@ void setup() {
   Relay_init();                  // 02 — TCA9554 relay outputs, all off
   DigitalInputs_init();          // 03 — DI pin modes
 
-  Modbus_init();                 // 04 — RS485 UART for the analog expansion modules
+  Modbus_init();                 // 04 — RS485 UART for the analog expansion modules and Carel controller
 
   Network_init();                 // 05 — Ethernet primary, automatic WiFi fallback if not usable
 
@@ -131,6 +131,12 @@ void loop() {
     // One batched read per AI module (not per point) — see Modbus_pollAiModule().
     Modbus_pollAiModules();
 
+    // Carel controller — one transaction per register type (08_CarelModbus.ino)
+    Carel_pollInputRegisters();
+    Carel_pollHoldingRegisters();
+    Carel_pollCoils();
+    Carel_pollDiscreteInputs();
+
     for (size_t i = 0; i < NUM_POINTS; i++) {
       float hmiValue;
       switch (points[i].kind) {
@@ -139,6 +145,15 @@ void loop() {
           break;
         case MODBUS_AI:
           hmiValue = points[i].lastModbusValue;  // filled by Modbus_pollAiModules() just above
+          break;
+        case CAREL_INPUT_REG:
+        case CAREL_HOLDING_REG:
+          // carelScale UNVERIFIED — see 08_CarelModbus.ino header before trusting this value
+          hmiValue = points[i].lastModbusValue / points[i].carelScale;
+          break;
+        case CAREL_COIL:
+        case CAREL_DISCRETE_IN:
+          hmiValue = points[i].lastModbusValue;  // already 0/1, no scaling
           break;
         default:
           continue;  // LOCAL_RELAY / MODBUS_AO are stimulus-only; the cmd/ack in Mqtt_onMessage covers confirmation
