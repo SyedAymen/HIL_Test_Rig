@@ -24,12 +24,26 @@ function channelValue(p) {
 const HEADERS = ['Timestamp', 'Section', 'Channel', 'Terminal', 'Direction', 'Kind', 'Value', 'Unit', 'Label']
 
 /**
+ * Builds the job/report metadata header lines shared by every export.
+ */
+function jobHeaderRows(job = {}, timestamp = new Date()) {
+  return [
+    ['Job Name', job.name ?? ''],
+    ['Job ID', job.id ?? ''],
+    ['Test Performed By', job.testedBy ?? ''],
+    ['Report Created By', job.reportBy ?? ''],
+    ['Generated', timestamp.toISOString()],
+    []
+  ]
+}
+
+/**
  * Pure — builds the snapshot CSV string for a whole test plan. No DOM access,
  * so it's straightforward to unit test outside a browser.
  */
-export function buildSnapshotCsv(testPlan, timestamp = new Date()) {
+export function buildSnapshotCsv(testPlan, timestamp = new Date(), job = {}) {
   const stamp = timestamp.toISOString()
-  const rows = [HEADERS]
+  const rows = [...jobHeaderRows(job, timestamp), HEADERS]
   for (const section of testPlan.sections) {
     for (const p of section.points) {
       rows.push([
@@ -45,6 +59,29 @@ export function buildSnapshotCsv(testPlan, timestamp = new Date()) {
       ])
     }
   }
+  return rows.map((row) => row.map(csvEscape).join(',')).join('\r\n')
+}
+
+const VERIFY_HEADERS = ['Signal', 'Rig ID', 'Carel ID', 'Kind', 'Rig (HMI) Value', 'Carel Value', 'Unit', 'Delta', 'Tolerance', 'Status']
+
+/**
+ * Pure — builds the verification report CSV: job header + one row per compared
+ * signal with its pass/fail verdict, then a summary line.
+ */
+export function buildVerificationCsv(results, summary, timestamp = new Date(), job = {}) {
+  const fmt = (v) => (v == null ? '' : typeof v === 'boolean' ? (v ? 'ON' : 'OFF') : Number(v).toFixed(2))
+  const rows = [...jobHeaderRows(job, timestamp), VERIFY_HEADERS]
+  for (const r of results) {
+    rows.push([
+      r.label, r.rigId, r.carelId, r.kind,
+      fmt(r.rigValue), fmt(r.carelValue), r.unit ?? '',
+      r.delta == null ? '' : Number(r.delta).toFixed(2),
+      r.kind === 'analog' ? r.tolerance : '',
+      r.status.toUpperCase()
+    ])
+  }
+  rows.push([])
+  rows.push(['Summary', `${summary.pass}/${summary.checked} passed`, `${summary.fail} failed`, `${summary.noData} no-data`, `${summary.percent}%`])
   return rows.map((row) => row.map(csvEscape).join(',')).join('\r\n')
 }
 
@@ -88,11 +125,19 @@ export function downloadCsv(filename, csvString) {
   URL.revokeObjectURL(url)
 }
 
-export function exportSnapshot(testPlan) {
+export function exportSnapshot(testPlan, job = {}) {
   const now = new Date()
-  const csv = buildSnapshotCsv(testPlan, now)
+  const csv = buildSnapshotCsv(testPlan, now, job)
   const stamp = now.toISOString().replace(/[:.]/g, '-')
   downloadCsv(`rig-snapshot-${stamp}.csv`, csv)
+}
+
+export function exportVerificationReport(results, summary, job = {}) {
+  const now = new Date()
+  const csv = buildVerificationCsv(results, summary, now, job)
+  const stamp = now.toISOString().replace(/[:.]/g, '-')
+  const slug = (job.id || job.name || 'report').toString().replace(/[^\w-]+/g, '-').slice(0, 40)
+  downloadCsv(`verification-${slug}-${stamp}.csv`, csv)
 }
 
 export function exportSignal(point, sectionId) {

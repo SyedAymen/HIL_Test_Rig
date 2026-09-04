@@ -10,23 +10,31 @@ import InputSpotlight from '../components/spotlight/InputSpotlight.vue'
 import TestRunnerPanel from '../components/automation/TestRunnerPanel.vue'
 import AlertPanel from '../components/alerts/AlertPanel.vue'
 import BmsView from './BmsView.vue'
+import VerifyView from './VerifyView.vue'
 
 const rig = useRigStore()
 const wsSend = inject('wsSend')
 
 const panelMode = ref('spotlight') // 'spotlight' | 'add' | 'automation'
 const bmsActive = ref(false)       // BMS tab shows the Carel Modbus view
+const verifyActive = ref(false)    // Verify tab shows the rig-vs-Carel comparison
 
 const activePoints = computed(() => rig.pointsInSection(rig.activeSectionId))
 const activeSection = computed(() => rig.activeSection)
 
 function onSelectSection(id) {
   bmsActive.value = false
+  verifyActive.value = false
   rig.selectSection(id)
   panelMode.value = 'spotlight'
 }
 function onSelectBms() {
   bmsActive.value = true
+  verifyActive.value = false
+}
+function onSelectVerify() {
+  verifyActive.value = true
+  bmsActive.value = false
 }
 function onSelectPoint(id) {
   rig.selectPoint(id)
@@ -40,7 +48,7 @@ function onRemovePoint(id) {
   rig.removePoint(rig.activeSectionId, id, wsSend)
 }
 function onExportSnapshot() {
-  exportSnapshot(rig.testPlan)
+  exportSnapshot(rig.testPlan, rig.job)
 }
 
 // a running/paused sequence is worth surfacing — but only while verification is on
@@ -56,18 +64,25 @@ watch(() => rig.testRun.waitingManual, (w) => {
       :sections="rig.sections"
       :active-section-id="rig.activeSectionId"
       :bms-active="bmsActive"
+      :verify-active="verifyActive"
       :simulation-on="rig.simulationOn"
       :verification-enabled="rig.verificationEnabled"
       :pass-percent="rig.overallSummary.percent"
       @select-section="onSelectSection"
       @select-bms="onSelectBms"
+      @select-verify="onSelectVerify"
       @toggle-simulation="rig.toggleSimulation(wsSend)"
       @release-all="rig.releaseAllOutputs(wsSend)"
       @export-snapshot="onExportSnapshot"
     />
 
+    <!-- Verify tab: rig HMI vs Carel bus pass/fail -->
+    <main v-if="verifyActive" class="flex-1 min-h-0 p-3 overflow-hidden">
+      <VerifyView />
+    </main>
+
     <!-- BMS tab: full-width Carel Modbus monitoring -->
-    <main v-if="bmsActive" class="flex-1 min-h-0 p-3 overflow-hidden">
+    <main v-else-if="bmsActive" class="flex-1 min-h-0 p-3 overflow-hidden">
       <BmsView />
     </main>
 
@@ -111,7 +126,12 @@ watch(() => rig.testRun.waitingManual, (w) => {
 
     <!-- footer: channel counts only (no pass/fail while verification is disabled) -->
     <footer class="h-11 flex items-center gap-6 px-4 border-t border-border bg-surface font-mono text-sm">
-      <template v-if="bmsActive">
+      <template v-if="verifyActive">
+        <span>VERIFY · <b>Rig HMI vs Carel Bus</b></span>
+        <span class="text-ttext-secondary">{{ rig.verificationSummary.pass }}/{{ rig.verificationSummary.checked }} passed</span>
+        <span class="text-ttext-tertiary hidden sm:inline">{{ rig.job.name || 'no job set' }}<template v-if="rig.job.id"> · {{ rig.job.id }}</template></span>
+      </template>
+      <template v-else-if="bmsActive">
         <span>BMS · <b>Carel Controller</b></span>
         <span class="text-ttext-secondary">{{ rig.bmsMap.points.length }} registers</span>
         <span class="text-ttext-tertiary hidden sm:inline">Modbus RTU over RS485 · live from the controller</span>

@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { seedTestPlan } from '../data/seedTestPlan'
 import { computeStatus } from '../utils/statusEngine'
 import { carelBmsMap, carelIdSet } from '../data/carelBmsMap'
+import { verificationMap } from '../data/verificationMap'
 
 const MAX_SAMPLES = 60
 
@@ -17,6 +18,14 @@ export const useRigStore = defineStore('rig', {
     bmsMap: carelBmsMap,
     bmsValues: {},       // { [id]: number | boolean }
     bmsLastUpdate: 0,    // ms epoch of the most recent CAREL-* telemetry
+
+    // Job / report metadata entered by the tester — flows into every export.
+    job: {
+      name: seededPlan.job?.name ?? '',
+      id: '',
+      testedBy: '',
+      reportBy: ''
+    },
     // Default false — Node-RED will push the real retained value via sim.status on
     // every dashboard (re)connect, so we don't want an optimistic 'true' here.
     simulationOn: false,
@@ -62,6 +71,55 @@ export const useRigStore = defineStore('rig', {
     },
     // True when we've never received Carel data, or it stopped ~>4s ago.
     bmsStale: (state) => !state.bmsLastUpdate || Date.now() - state.bmsLastUpdate > 4000,
+
+    // Per-signal comparison of the rig's HMI value against the Carel bus value.
+    // Returns one row per verificationMap pair with a pass/fail/no-data verdict.
+    verificationResults(state) {
+      const findRig = (id) => {
+        for (const s of state.testPlan.sections) {
+          const p = s.points.find((pt) => pt.id === id)
+          if (p) return p
+        }
+        return null
+      }
+      return verificationMap.map((m) => {
+        const rig = findRig(m.rigId)
+        // outputs report what they drive; inputs report what they sense
+        const rigRaw = rig ? (rig.role === 'output' ? rig.commandedValue : rig.hmiValue) : undefined
+        const carel = state.bmsValues[m.carelId]
+        const row = {
+          rigId: m.rigId, carelId: m.carelId, label: m.label, kind: m.kind,
+          unit: m.unit ?? '', tolerance: m.tolerance,
+          rigRaw, rigValue: null, carelValue: carel, delta: null, status: 'no-data'
+        }
+        const missing = rigRaw == null || carel === undefined || carel === null
+        if (m.kind === 'analog') {
+          if (!missing) {
+            const v = Math.max(0, Math.min(10, Number(rigRaw)))
+            const eng = m.engMin + (v / 10) * (m.engMax - m.engMin)
+            row.rigValue = eng
+            row.delta = Math.abs(eng - Number(carel))
+            row.status = row.delta <= m.tolerance ? 'pass' : 'fail'
+          }
+        } else {
+          if (!missing) {
+            const rb = !!rigRaw
+            const cb = m.invert ? !carel : !!carel
+            row.rigValue = rb
+            row.status = rb === cb ? 'pass' : 'fail'
+          }
+        }
+        return row
+      })
+    },
+    verificationSummary() {
+      const r = this.verificationResults
+      const pass = r.filter((x) => x.status === 'pass').length
+      const fail = r.filter((x) => x.status === 'fail').length
+      const noData = r.filter((x) => x.status === 'no-data').length
+      const checked = pass + fail
+      return { total: r.length, pass, fail, noData, checked, percent: checked ? Math.round((pass / checked) * 100) : 0 }
+    },
 
     pointsInSection: (state) => (sectionId) => {
       const section = state.testPlan.sections.find((s) => s.id === sectionId)
@@ -220,6 +278,11 @@ export const useRigStore = defineStore('rig', {
     sendBmsCommand(id, value, send) {
       this.bmsValues[id] = value   // optimistic; the next poll / ack confirms
       this._send(send, { type: 'io.command', payload: { id, value }, ts: Date.now() })
+    },
+
+    // Update job / report metadata (merges the given fields).
+    setJob(patch) {
+      this.job = { ...this.job, ...patch }
     },
 
     // Dormant verification helper — manual "controller display" entry.

@@ -121,7 +121,7 @@ export function seedTestPlan() {
 
   return {
     job: {
-      name: 'Monin Syrup Production Plant — AHU with EC Fans',
+      name: '',
       drawingNo: 'AHU Control Scheme rev.1',
       ahuSlNo: '-',
       panel: 'CONTROLLER WITH EC FAN'
