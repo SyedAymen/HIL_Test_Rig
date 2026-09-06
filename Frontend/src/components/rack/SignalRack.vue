@@ -114,12 +114,12 @@ function fmtV(v) {
             @click="jumpTo(p.id)"
           >
             <!-- identity -->
-            <div class="w-32 shrink-0 min-w-0">
+            <div class="w-52 shrink-0 min-w-0">
               <div class="flex items-center gap-2">
                 <span class="w-2.5 h-2.5 rounded-full border-2 flex-none" :style="{ borderColor: ROLE_COLOR[p.role] }"></span>
-                <span class="text-sm font-semibold truncate" :class="{ 'text-primary-dark': p.id === selectedId }">{{ p.id }}</span>
+                <span class="text-sm font-semibold truncate" :class="{ 'text-primary-dark': p.id === selectedId }">{{ p.label }}</span>
               </div>
-              <p class="font-mono text-xs text-ttext-tertiary truncate pl-4">{{ p.terminal }}</p>
+              <p class="font-mono text-xs text-ttext-tertiary truncate pl-4">{{ p.id }} · {{ p.terminal }}</p>
             </div>
 
             <!-- trace -->

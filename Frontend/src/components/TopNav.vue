@@ -7,11 +7,12 @@ defineProps({
   activeSectionId: { type: String, required: true },
   bmsActive: { type: Boolean, default: false },
   verifyActive: { type: Boolean, default: false },
+  testActive: { type: Boolean, default: false },
   simulationOn: { type: Boolean, required: true },
   verificationEnabled: { type: Boolean, default: false },
   passPercent: { type: Number, default: 0 }
 })
-defineEmits(['select-section', 'select-bms', 'select-verify', 'toggle-simulation', 'release-all', 'export-snapshot'])
+defineEmits(['select-section', 'select-bms', 'select-verify', 'select-test', 'toggle-simulation', 'release-all', 'export-snapshot'])
 </script>
 
 <template>
@@ -22,7 +23,7 @@ defineEmits(['select-section', 'select-bms', 'select-verify', 'toggle-simulation
         <button
           v-for="s in sections" :key="s.id"
           class="uppercase pb-1 -mb-px whitespace-nowrap"
-          :class="(s.id === activeSectionId && !bmsActive && !verifyActive) ? 'text-primary-dark border-b-2 border-primary font-bold' : 'text-ttext-tertiary'"
+          :class="(s.id === activeSectionId && !bmsActive && !verifyActive && !testActive) ? 'text-primary-dark border-b-2 border-primary font-bold' : 'text-ttext-tertiary'"
           @click="$emit('select-section', s.id)"
         >{{ s.id }}</button>
         <span class="w-px h-4 bg-border"></span>
@@ -36,6 +37,11 @@ defineEmits(['select-section', 'select-bms', 'select-verify', 'toggle-simulation
           :class="verifyActive ? 'text-primary-dark border-b-2 border-primary font-bold' : 'text-ttext-tertiary'"
           @click="$emit('select-verify')"
         >Verify</button>
+        <button
+          class="uppercase pb-1 -mb-px whitespace-nowrap"
+          :class="testActive ? 'text-primary-dark border-b-2 border-primary font-bold' : 'text-ttext-tertiary'"
+          @click="$emit('select-test')"
+        >Test</button>
       </nav>
     </div>
 

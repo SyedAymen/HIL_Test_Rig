@@ -3,6 +3,7 @@ import { computed, inject, ref } from 'vue'
 import { useRigStore } from '../../stores/rig'
 import AnalogLane from '../rack/AnalogLane.vue'
 import DigitalLane from '../rack/DigitalLane.vue'
+import SignalMeta from './SignalMeta.vue'
 import { exportSignal } from '../../utils/exportCsv'
 
 // role: 'output' — the rig PRODUCES this signal (AO voltage / DO ON-OFF).
@@ -82,14 +83,7 @@ function commandDigital(state) {
       </div>
     </div>
 
-    <div class="mb-1">
-      <p class="text-2xl font-bold">{{ point.id }}</p>
-      <p class="text-base text-ttext-secondary">{{ point.label }}</p>
-    </div>
-
-    <p class="font-mono text-xs text-ttext-tertiary mb-4">
-      Terminal {{ point.terminal }}, GND · {{ isDigital ? 'digital ON/OFF' : 'analog 0–10 V' }} channel
-    </p>
+    <SignalMeta :point="point" />
 
     <!-- ============ DIGITAL OUTPUT ============ -->
     <template v-if="isDigital">

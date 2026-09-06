@@ -50,12 +50,12 @@ function onExport() {
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         <label class="block">
           <span class="text-xs font-medium text-ttext-secondary">Job Name</span>
-          <input v-model="jobName" type="text" placeholder="Job Name"
+          <input v-model="jobName" type="text" placeholder="e.g. Toray Mas Apparel AHU"
                  class="mt-1 w-full h-9 px-3 rounded-lg border-2 border-border bg-surface text-sm" />
         </label>
         <label class="block">
           <span class="text-xs font-medium text-ttext-secondary">Job ID</span>
-          <input v-model="jobId" type="text" placeholder="Job ID"
+          <input v-model="jobId" type="text" placeholder="e.g. AHUM-HY-E2606-6684"
                  class="mt-1 w-full h-9 px-3 rounded-lg border-2 border-border bg-surface text-sm" />
         </label>
         <label class="block">

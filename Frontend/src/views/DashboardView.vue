@@ -11,6 +11,7 @@ import TestRunnerPanel from '../components/automation/TestRunnerPanel.vue'
 import AlertPanel from '../components/alerts/AlertPanel.vue'
 import BmsView from './BmsView.vue'
 import VerifyView from './VerifyView.vue'
+import AutoTestView from './AutoTestView.vue'
 
 const rig = useRigStore()
 const wsSend = inject('wsSend')
@@ -18,6 +19,7 @@ const wsSend = inject('wsSend')
 const panelMode = ref('spotlight') // 'spotlight' | 'add' | 'automation'
 const bmsActive = ref(false)       // BMS tab shows the Carel Modbus view
 const verifyActive = ref(false)    // Verify tab shows the rig-vs-Carel comparison
+const testActive = ref(false)      // Test tab runs the 18-signal auto/manual sequence
 
 const activePoints = computed(() => rig.pointsInSection(rig.activeSectionId))
 const activeSection = computed(() => rig.activeSection)
@@ -25,16 +27,24 @@ const activeSection = computed(() => rig.activeSection)
 function onSelectSection(id) {
   bmsActive.value = false
   verifyActive.value = false
+  testActive.value = false
   rig.selectSection(id)
   panelMode.value = 'spotlight'
 }
 function onSelectBms() {
   bmsActive.value = true
   verifyActive.value = false
+  testActive.value = false
 }
 function onSelectVerify() {
   verifyActive.value = true
   bmsActive.value = false
+  testActive.value = false
+}
+function onSelectTest() {
+  testActive.value = true
+  bmsActive.value = false
+  verifyActive.value = false
 }
 function onSelectPoint(id) {
   rig.selectPoint(id)
@@ -65,19 +75,26 @@ watch(() => rig.testRun.waitingManual, (w) => {
       :active-section-id="rig.activeSectionId"
       :bms-active="bmsActive"
       :verify-active="verifyActive"
+      :test-active="testActive"
       :simulation-on="rig.simulationOn"
       :verification-enabled="rig.verificationEnabled"
       :pass-percent="rig.overallSummary.percent"
       @select-section="onSelectSection"
       @select-bms="onSelectBms"
       @select-verify="onSelectVerify"
+      @select-test="onSelectTest"
       @toggle-simulation="rig.toggleSimulation(wsSend)"
       @release-all="rig.releaseAllOutputs(wsSend)"
       @export-snapshot="onExportSnapshot"
     />
 
+    <!-- Test tab: 18-signal auto/manual test sequence -->
+    <main v-if="testActive" class="flex-1 min-h-0 p-3 overflow-hidden">
+      <AutoTestView />
+    </main>
+
     <!-- Verify tab: rig HMI vs Carel bus pass/fail -->
-    <main v-if="verifyActive" class="flex-1 min-h-0 p-3 overflow-hidden">
+    <main v-else-if="verifyActive" class="flex-1 min-h-0 p-3 overflow-hidden">
       <VerifyView />
     </main>
 

@@ -1,48 +1,38 @@
-// Verification map — pairs each rig channel (its HMI value on the dashboard)
-// with the matching value the Carel controller reports on its Modbus bus, so we
-// can decide PASS/FAIL per signal now that the RS485 link exists.
+// Verification map — pairs each rig channel (its HMI value on the dashboard) with
+// the matching value the Carel controller reports on its Modbus bus, to decide
+// PASS/FAIL per signal. rigId is the firmware channel id (AO-1.., DI-1.. — see
+// seedTestPlan.js); carelId is a CAREL-* id from carelBmsMap.js.
 //
-// HOW A COMPARISON WORKS
-//   • Rig analog values are raw 0–10 V on the dashboard. Each pair says what
-//     engineering range that 0–10 V represents (engMin..engMax, matching the
-//     Carel value's unit), so the rig volts are converted to engineering units
-//     and compared to the Carel reading within `tolerance` (engineering units).
-//   • Rig digital values are booleans, compared directly to the Carel bit
-//     (set `invert: true` if the wiring makes rig-ON correspond to Carel-OFF).
-//   • For rig OUTPUT channels the rig value is what it DRIVES (commandedValue);
-//     for INPUT channels it's what it SENSES (hmiValue). The store picks the
-//     right one from the point's role.
+//   • analog: the rig's 0–10 V is converted to engineering units via engMin..engMax
+//     (matching the Carel unit) and compared within `tolerance`.
+//   • digital: booleans compared directly (`invert: true` if rig-ON = Carel-OFF).
+//   • rig OUTPUT channels compare what they DRIVE; INPUT channels what they SENSE.
 //
-// TUNE THIS TO YOUR RIG. The default pairs below match signals by name across
-// the rig I/O map and the Carel BMS map; ranges/tolerances are first-pass
-// engineering guesses. Verify each against the controller and adjust. Comment
-// out (or delete) any pair that isn't wired on your bench — an unmapped signal
-// simply isn't verified. rigId must exist in seedTestPlan.js; carelId in
-// carelBmsMap.js.
+// TUNE TO YOUR BENCH. Ranges/tolerances are first-pass; comment out any pair not
+// wired. A few tentative pairs are flagged.
 
-// a = analog pair, d = digital pair
 const a = (rigId, carelId, label, engMin, engMax, unit, tolerance) =>
   ({ rigId, carelId, label, kind: 'analog', engMin, engMax, unit, tolerance })
 const d = (rigId, carelId, label, invert = false) =>
   ({ rigId, carelId, label, kind: 'digital', invert })
 
 export const verificationMap = [
-  // ---- Analog: rig drives a sensor sim → controller should read it back ----
-  a('DPT',       'CAREL-DPT', 'Differential Pressure', 0, 1000, 'Pa', 20),
-  a('RAT',       'CAREL-RAT', 'Return Air Temp',       0, 50,   '°C', 1.0),
-  a('RAH',       'CAREL-RAH', 'Return Air Humidity',   0, 100,  '%',  3),
+  // Analog — rig drives a sensor sim → controller should read it back
+  a('AO-1', 'CAREL-DPT', 'Differential Pressure', 0, 1000, 'Pa', 20),
+  a('AO-6', 'CAREL-RAT', 'Return Air Temperature', 0, 50, '°C', 1.0),
+  a('A0-7', 'CAREL-RAH', 'Return Air Humidity', 0, 100, '%', 3),
 
-  // ---- Analog: rig senses a controller output → controller states the same % ----
-  a('EC-FAN',    'CAREL-FAN-OUT', 'EC Fan Output',     0, 100, '%', 3),
-  a('CHW-VALVE', 'CAREL-CWV-OUT', 'CW Valve Output',   0, 100, '%', 3),
+  // Analog — rig senses a controller output → controller states the same %
+  a('AI-1', 'CAREL-FAN-OUT', 'EC Fan Output', 0, 100, '%', 3),
+  a('AI-2', 'CAREL-CWV-OUT', 'CW Valve Output', 0, 100, '%', 3),
 
-  // ---- Digital: rig drives a contact → controller status bit ----
-  d('AUTO-MAN',    'CAREL-AUTO-MAN',    'Auto/Manual Status'),
-  d('FIRE-STATUS', 'CAREL-FIRE-STATUS', 'Fire Status'),
-  d('EC-TRIP',     'CAREL-EC-FAN-TRIP', 'EC Fan Trip'),
+  // Digital — rig drives a contact → controller status bit
+  d('DO-1', 'CAREL-AUTO-MAN', 'Auto/Manual Status'),
+  d('DO-5', 'CAREL-FIRE-STATUS', 'Fire Status'),
+  d('DO-4', 'CAREL-EC-FAN-TRIP', 'EC Fan Trip'),
 
-  // ---- Tentative pairs — confirm the wiring/polarity, then keep or remove ----
-  a('CW-VALVE-FBK', 'CAREL-CWV-OUT', 'CW Valve Feedback vs Output', 0, 100, '%', 5),
-  d('FILTER-STATUS', 'CAREL-PRE-FILTER', 'Filter Status'),
-  d('AHU-CMD',       'CAREL-ON-OFF-CMD', 'AHU On/Off Command')
+  // Tentative — confirm wiring/polarity, then keep or remove
+  a('AO-3', 'CAREL-CWV-OUT', 'CW Valve Feedback vs Output', 0, 100, '%', 5),
+  d('DO-3', 'CAREL-PRE-FILTER', 'Filter Status'),
+  d('DI-1', 'CAREL-ON-OFF-CMD', 'AHU On/Off Command')
 ]

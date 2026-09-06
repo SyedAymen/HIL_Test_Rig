@@ -21,7 +21,30 @@ function channelValue(p) {
   return raw == null ? '' : Number(raw).toFixed(2)
 }
 
-const HEADERS = ['Timestamp', 'Section', 'Channel', 'Terminal', 'Direction', 'Kind', 'Value', 'Unit', 'Label']
+const HEADERS = ['Timestamp', 'Section', 'S.No', 'Channel', 'Description', 'Direction', 'Kind', 'From', 'To', 'Signal Level', 'Value', 'Value Unit', 'Eng Range', 'Set Point', 'Eng Unit', 'Purpose', 'Alarm']
+
+// One CSV row for a point — shared by the snapshot and single-signal exports.
+function pointRow(p, sectionId, stamp) {
+  return [
+    stamp,
+    sectionId ?? '',
+    p.sNo ?? '',
+    p.id,
+    p.label ?? '',
+    directionLabel(p.role),
+    p.kind,
+    p.from ?? '',
+    p.to ?? '',
+    p.signalLevel ?? '',
+    channelValue(p),
+    p.kind === 'digital' ? '' : (p.unit ?? 'V'),
+    p.rangeText ?? '',
+    p.setpoint ?? '',
+    p.engUnit ?? '',
+    p.purpose ?? '',
+    p.alarm ? 'Yes' : 'No'
+  ]
+}
 
 /**
  * Builds the job/report metadata header lines shared by every export.
@@ -46,17 +69,7 @@ export function buildSnapshotCsv(testPlan, timestamp = new Date(), job = {}) {
   const rows = [...jobHeaderRows(job, timestamp), HEADERS]
   for (const section of testPlan.sections) {
     for (const p of section.points) {
-      rows.push([
-        stamp,
-        section.id,
-        p.id,
-        p.terminal ?? '',
-        directionLabel(p.role),
-        p.kind,
-        channelValue(p),
-        p.kind === 'digital' ? '' : (p.unit ?? 'V'),
-        p.label ?? ''
-      ])
+      rows.push(pointRow(p, section.id, stamp))
     }
   }
   return rows.map((row) => row.map(csvEscape).join(',')).join('\r\n')
@@ -92,20 +105,7 @@ export function buildVerificationCsv(results, summary, timestamp = new Date(), j
  */
 export function buildSignalCsv(point, sectionId, timestamp = new Date()) {
   const stamp = timestamp.toISOString()
-  const rows = [
-    HEADERS,
-    [
-      stamp,
-      sectionId ?? '',
-      point.id,
-      point.terminal ?? '',
-      directionLabel(point.role),
-      point.kind,
-      channelValue(point),
-      point.kind === 'digital' ? '' : (point.unit ?? 'V'),
-      point.label ?? ''
-    ]
-  ]
+  const rows = [HEADERS, pointRow(point, sectionId, stamp)]
   return rows.map((row) => row.map(csvEscape).join(',')).join('\r\n')
 }
 
