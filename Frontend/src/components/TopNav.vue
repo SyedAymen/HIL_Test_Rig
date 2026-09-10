@@ -6,13 +6,11 @@ defineProps({
   sections: { type: Array, required: true },   // [{ id, label }] — any length
   activeSectionId: { type: String, required: true },
   bmsActive: { type: Boolean, default: false },
-  verifyActive: { type: Boolean, default: false },
   testActive: { type: Boolean, default: false },
   simulationOn: { type: Boolean, required: true },
-  verificationEnabled: { type: Boolean, default: false },
   passPercent: { type: Number, default: 0 }
 })
-defineEmits(['select-section', 'select-bms', 'select-verify', 'select-test', 'toggle-simulation', 'release-all', 'export-snapshot'])
+defineEmits(['select-section', 'select-bms', 'select-test', 'toggle-simulation', 'release-all'])
 </script>
 
 <template>
@@ -23,7 +21,7 @@ defineEmits(['select-section', 'select-bms', 'select-verify', 'select-test', 'to
         <button
           v-for="s in sections" :key="s.id"
           class="uppercase pb-1 -mb-px whitespace-nowrap"
-          :class="(s.id === activeSectionId && !bmsActive && !verifyActive && !testActive) ? 'text-primary-dark border-b-2 border-primary font-bold' : 'text-ttext-tertiary'"
+          :class="(s.id === activeSectionId && !bmsActive && !testActive) ? 'text-primary-dark border-b-2 border-primary font-bold' : 'text-ttext-tertiary'"
           @click="$emit('select-section', s.id)"
         >{{ s.id }}</button>
         <span class="w-px h-4 bg-border"></span>
@@ -32,11 +30,6 @@ defineEmits(['select-section', 'select-bms', 'select-verify', 'select-test', 'to
           :class="bmsActive ? 'text-primary-dark border-b-2 border-primary font-bold' : 'text-ttext-tertiary'"
           @click="$emit('select-bms')"
         >BMS</button>
-        <button
-          class="uppercase pb-1 -mb-px whitespace-nowrap"
-          :class="verifyActive ? 'text-primary-dark border-b-2 border-primary font-bold' : 'text-ttext-tertiary'"
-          @click="$emit('select-verify')"
-        >Verify</button>
         <button
           class="uppercase pb-1 -mb-px whitespace-nowrap"
           :class="testActive ? 'text-primary-dark border-b-2 border-primary font-bold' : 'text-ttext-tertiary'"
@@ -63,16 +56,9 @@ defineEmits(['select-section', 'select-bms', 'select-verify', 'select-test', 'to
         @click="$emit('release-all')"
       >Release All Outputs</button>
 
-      <!-- one-click raw snapshot of every channel -->
-      <button
-        class="h-9 px-3 rounded-lg bg-primary text-white font-mono text-xs font-bold whitespace-nowrap"
-        @click="$emit('export-snapshot')"
-      >Export Snapshot</button>
-
       <ConnectionStatus :status="status" />
 
       <span
-        v-if="verificationEnabled"
         class="h-9 px-3 rounded-full bg-success-soft text-success font-mono text-xs font-bold flex items-center whitespace-nowrap"
       >{{ passPercent }}% Passed</span>
     </div>

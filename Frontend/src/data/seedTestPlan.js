@@ -95,10 +95,10 @@ export function seedTestPlan() {
 
   return {
     job: {
-      name: 'Monin Syrup Production Plant — AHU with EC Fans',
-      drawingNo: 'Systemair AHU Control Scheme rev.1',
-      ahuSlNo: '-',
-      panel: 'CONTROLLER WITH EC FAN'
+      name: '',
+      drawingNo: '',
+      ahuSlNo: '',
+      panel: ''
     },
     sections: [
       { id: 'AO', label: 'Analog Output',  points: aoPoints },

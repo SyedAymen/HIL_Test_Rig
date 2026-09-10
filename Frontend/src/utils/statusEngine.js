@@ -1,47 +1,40 @@
+import { verificationMap } from '../data/verificationMap'
+
 /**
- * DORMANT while store.verificationEnabled is false (no RS485 link to the UUT
- * yet, so nothing to compare against). Kept intact for the day verification is
- * switched back on. Every point's status is derived, never stored as a raw flag
- * someone could set inconsistently. Feed it the point, get back one of:
- *   'pending'          — not enough data yet to judge
- *   'awaiting-manual'  — HMI/telemetry side checks out, still waiting on the
- *                        tester's manual "Controller Display" entry
+ * Computes pass/fail for a rig point by comparing it against the Carel
+ * controller's own independently-reported value for the same physical
+ * signal, via verificationMap. This is the single source of truth for
+ * status everywhere in the app (Signal Rack, section/overall summaries,
+ * CSV export) — there is no separate "verification on/off" concept
+ * anymore, and no manual-entry step. Feed it a point plus the live
+ * bmsValues map, get back one of:
+ *   'pending' — no Carel counterpart configured for this point, or the
+ *               Carel bus hasn't reported a value yet
  *   'pass' | 'fail'
  */
-function withinTolerance(value, target, tolerancePercent) {
-  if (value == null || target == null) return null
-  const pct = tolerancePercent ?? 5
-  const tol = Math.max(Math.abs(target) * (pct / 100), 0.0001)
-  return Math.abs(value - target) <= tol
-}
+const mapByRigId = Object.fromEntries(verificationMap.map((m) => [m.rigId, m]))
 
-export function computeStatus(point) {
-  if (point.kind === 'digital') {
-    if (point.role === 'output') {
-      if (point.hmiValue == null) return 'pending'
-      return point.hmiValue === point.commandedValue ? 'pass' : 'fail'
-    }
-    // digital input (sensed relay) — no feedback contact assumed, needs a human to confirm
-    if (point.confirmed == null) return 'pending'
-    return point.confirmed ? 'pass' : 'fail'
+export function computeStatus(point, bmsValues = {}) {
+  const m = mapByRigId[point.id]
+  if (!m) return 'pending' // no Carel-side signal exists to compare against
+
+  const rigRaw = point.role === 'output' ? point.commandedValue : point.hmiValue
+  const carel = bmsValues[m.carelId]
+  if (rigRaw == null || carel == null) return 'pending'
+
+  if (m.kind === 'analog') {
+    const v = Math.max(0, Math.min(10, Number(rigRaw)))
+    const eng = m.engMin + (v / 10) * (m.engMax - m.engMin)
+    return Math.abs(eng - Number(carel)) <= m.tolerance ? 'pass' : 'fail'
   }
 
-  // analog
-  const target = point.commandedValue ?? point.acceptableValue
-  if (target == null) return 'pending'
-
-  const hmiOk = withinTolerance(point.hmiValue, target, point.tolerancePercent)
-  const ctrlOk = withinTolerance(point.controllerValue, target, point.tolerancePercent)
-
-  if (hmiOk === false || ctrlOk === false) return 'fail'
-  if (hmiOk === true && ctrlOk === true) return 'pass'
-  if (hmiOk === true && ctrlOk === null) return 'awaiting-manual'
-  return 'pending'
+  const rb = !!rigRaw
+  const cb = m.invert ? !carel : !!carel
+  return rb === cb ? 'pass' : 'fail'
 }
 
 export const STATUS_COLOR = {
   pass: '#1FB871',
   fail: '#E23838',
-  pending: '#BBBFCF',
-  'awaiting-manual': '#EEC13B'
+  pending: '#BBBFCF'
 }

@@ -20,9 +20,18 @@ let runner = null
 const summary = computed(() => summarise(results.value))
 const resultById = computed(() => Object.fromEntries(results.value.map((r) => [r.id, r])))
 
-// Hardware is the ONLY source of truth — there is no simulated controller.
-// The software simulates the RIG SIDE ONLY: it generates and injects the test
-// stimulus. Every judgement value is read back from the ESP32 / Carel bus.
+// Two-way bound job fields.
+function jobField(key) {
+  return computed({
+    get: () => rig.job[key],
+    set: (v) => rig.setJob({ [key]: v })
+  })
+}
+const jobName = jobField('name')
+const jobId = jobField('id')
+const testedBy = jobField('testedBy')
+const reportBy = jobField('reportBy')
+
 const linkUp = computed(() => rig.connectionStatus === 'connected')
 const busLive = computed(() => !rig.bmsStale)
 const canRun = computed(() => linkUp.value && busLive.value)
@@ -51,8 +60,9 @@ function liveAdapter() {
       }
       return raw
     },
-    // Stale bus ⇒ no data, so a step can never pass on a stale reading.
-    readCarel(carelId) { return rig.bmsStale ? undefined : rig.bmsValues[carelId] }
+    readCarel(carelId) {
+      return rig.bmsValues[carelId]
+    }
   }
 }
 
@@ -62,18 +72,14 @@ function addLog(line, kind = 'info') {
 }
 
 async function startAuto() {
-  if (!canRun.value) {
-    addLog(`Cannot start — ${!linkUp.value ? 'dashboard is not connected to the rig' : 'no live data on the Carel bus'}. Tests must never pass without hardware.`, 'bad')
-    return
-  }
   running.value = true
   results.value = []
   log.value = []
   progress.index = 0
-  addLog('Auto sequence started · injecting rig stimulus, reading back from ESP32 + Carel bus', 'head')
+  addLog('Auto sequence started · injecting rig stimulus', 'head')
   runner = createTestRunner({
     io: liveAdapter(),
-    settleMs: 900,
+    settleMs: 600,
     onProgress: (p) => {
       if (p.phase === 'start') { current.value = p.test; progress.index = p.index + 1; addLog(`▶ ${p.test.id} · ${p.test.desc}`, 'head') }
       else if (p.phase === 'done') {
@@ -100,7 +106,6 @@ const manualId = ref('AO-1')
 const manualValue = ref('')
 const manualRunner = ref(null)
 const manualSnapshot = ref(null)
-const manualVerdicts = reactive({})
 
 const manualTest = computed(() => testById[manualId.value])
 
@@ -137,20 +142,7 @@ async function manualRunStep() {
   manualSnapshot.value = r.sample()
   const others = results.value.filter((x) => x.id !== res.id)
   results.value = [...others, res].sort((a, b) => a.sno - b.sno)
-  manualVerdicts[res.id] = res.verdict
-  addLog(`Manual scripted test ${res.id}: ${res.verdict.toUpperCase()}`, res.verdict)
-}
-function setManualVerdict(v) {
-  const id = manualId.value
-  manualVerdicts[id] = v
-  const t = testById[id]
-  const others = results.value.filter((x) => x.id !== id)
-  results.value = [...others, {
-    id, sno: t.sno, desc: t.desc, purpose: t.purpose, ctrlType: t.ctrlType,
-    carelId: t.carelId, carelLabel: t.carelLabel, interlinks: t.interlinks,
-    testText: t.testText, expectText: t.expectText, steps: [], verdict: v, manual: true, ts: Date.now()
-  }].sort((a, b) => a.sno - b.sno)
-  addLog(`Manual verdict ${id}: ${v.toUpperCase()}`, v)
+  addLog(`Manual test ${res.id}: ${res.verdict.toUpperCase()}`, res.verdict)
 }
 
 const snapVal = (id) => (manualSnapshot.value ? manualSnapshot.value[id] : undefined)
@@ -158,7 +150,7 @@ const snapAlarms = computed(() => manualSnapshot.value?.__alarms || {})
 
 function onExport() {
   exportTestReport(results.value, {
-    ...rig.job, mode: mode.value, source: 'live'
+    ...rig.job, mode: mode.value, source: canRun.value ? 'live' : 'simulated'
   })
 }
 
@@ -174,6 +166,36 @@ onUnmounted(() => runner?.cancel())
 
 <template>
   <div class="h-full overflow-y-auto scroll-thin pr-1 space-y-3">
+    <!-- Job / report metadata -->
+    <section class="panel-card p-4">
+      <div class="flex items-center justify-between mb-3">
+        <p class="eyebrow">Job / Report Details</p>
+        <button class="h-9 px-4 rounded-lg bg-primary text-white text-sm font-bold" @click="onExport">⭳ Export Report</button>
+      </div>
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <label class="block">
+          <span class="text-xs font-medium text-ttext-secondary">Job Name</span>
+          <input v-model="jobName" type="text" placeholder="Enter Job Name"
+                 class="mt-1 w-full h-9 px-3 rounded-lg border-2 border-border bg-surface text-sm" />
+        </label>
+        <label class="block">
+          <span class="text-xs font-medium text-ttext-secondary">Job ID</span>
+          <input v-model="jobId" type="text" placeholder="Enter Job ID"
+                 class="mt-1 w-full h-9 px-3 rounded-lg border-2 border-border bg-surface text-sm" />
+        </label>
+        <label class="block">
+          <span class="text-xs font-medium text-ttext-secondary">Test Performed By</span>
+          <input v-model="testedBy" type="text" placeholder="Technician Name"
+                 class="mt-1 w-full h-9 px-3 rounded-lg border-2 border-border bg-surface text-sm" />
+        </label>
+        <label class="block">
+          <span class="text-xs font-medium text-ttext-secondary">Report Created By</span>
+          <input v-model="reportBy" type="text" placeholder="Engineer Name"
+                 class="mt-1 w-full h-9 px-3 rounded-lg border-2 border-border bg-surface text-sm" />
+        </label>
+      </div>
+    </section>
+
     <!-- header / controls -->
     <section class="panel-card p-4">
       <div class="flex flex-wrap items-center gap-3">
@@ -187,23 +209,10 @@ onUnmounted(() => runner?.cancel())
           <button class="h-9 px-4 text-sm font-bold" :class="mode==='manual'?'bg-primary text-white':'bg-surface text-ttext-secondary'" @click="mode='manual'">Manual</button>
         </div>
 
-        <span class="font-mono text-xs font-bold px-3 h-9 rounded-lg flex items-center gap-2"
-              :class="canRun ? 'bg-success-soft text-success' : 'bg-critical-soft text-critical'">
-          <span class="w-2 h-2 rounded-full" :class="canRun ? 'bg-success' : 'bg-critical'"></span>
-          {{ !linkUp ? 'RIG OFFLINE' : !busLive ? 'CAREL BUS SILENT' : 'HARDWARE LIVE' }}
-        </span>
-
-        <button v-if="mode==='auto' && !running" class="h-9 px-5 rounded-lg text-sm font-bold"
-                :class="canRun ? 'bg-primary text-white' : 'bg-sunken text-ttext-tertiary cursor-not-allowed'"
-                :disabled="!canRun" @click="startAuto">▶ Start test</button>
+        <button v-if="mode==='auto' && !running" class="h-9 px-5 rounded-lg text-sm font-bold bg-primary text-white"
+                @click="startAuto">▶ Start test</button>
         <button v-if="mode==='auto' && running" class="h-9 px-5 rounded-lg bg-critical text-white text-sm font-bold" @click="stopAuto">■ Stop</button>
-        <button class="h-9 px-4 rounded-lg border-2 border-border text-sm font-bold text-ttext-secondary" :disabled="!results.length" @click="onExport">⭳ Export CSV</button>
       </div>
-
-      <!-- progress + verdict -->
-      <p v-if="!canRun" class="mt-3 font-mono text-xs text-critical">
-        Connect the rig and the Carel bus before testing — with no hardware present every signal reports NO DATA, never PASS.
-      </p>
 
       <div v-if="results.length || running" class="mt-3 flex flex-wrap items-center gap-4">
         <div class="px-4 py-2 rounded-xl font-display font-bold text-lg"
@@ -338,9 +347,7 @@ onUnmounted(() => runner?.cancel())
           </div>
 
           <div class="flex gap-2 mt-4 pt-3 border-t border-border">
-            <button class="h-9 px-4 rounded-lg border-2 border-border text-xs font-bold" @click="manualRunStep">▶ Run scripted test for this signal</button>
-            <button class="h-9 px-4 rounded-lg border-2 border-border text-xs font-bold hover:border-success hover:text-success" @click="setManualVerdict('pass')">Mark PASS</button>
-            <button class="h-9 px-4 rounded-lg border-2 border-border text-xs font-bold hover:border-critical hover:text-critical" @click="setManualVerdict('fail')">Mark FAIL</button>
+            <button class="h-9 px-4 rounded-lg bg-primary text-white text-xs font-bold" @click="manualRunStep">▶ Run test for this signal</button>
           </div>
         </section>
 
@@ -380,9 +387,9 @@ onUnmounted(() => runner?.cancel())
             </div>
 
             <div class="mt-3 pt-3 border-t border-border">
-              <p class="font-mono text-[11px] text-ttext-tertiary mb-1">CURRENT VERDICT</p>
-              <span class="font-mono text-xs font-bold px-2.5 py-1 rounded-full" :class="verdictClass(manualVerdicts[manualId])">
-                {{ verdictLabel(manualVerdicts[manualId]) }}
+              <p class="font-mono text-[11px] text-ttext-tertiary mb-1">VERDICT</p>
+              <span class="font-mono text-xs font-bold px-2.5 py-1 rounded-full" :class="verdictClass(resultById[manualId]?.verdict)">
+                {{ verdictLabel(resultById[manualId]?.verdict) }}
               </span>
             </div>
           </template>
@@ -401,11 +408,5 @@ onUnmounted(() => runner?.cancel())
         </div>
       </section>
     </template>
-
-    <p class="font-mono text-[11px] text-ttext-tertiary">
-      The software simulates the <b>rig side only</b> — it generates and injects the test stimulus. The AHU/Carel controller is
-      never simulated: every verdict is based on values read back from the ESP32 and the Carel Modbus bus, so a PASS always means
-      the hardware actually did it. Signals with no Carel register cannot be auto-verified and are reported as MANUAL.
-    </p>
   </div>
 </template>

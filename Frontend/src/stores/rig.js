@@ -21,7 +21,7 @@ export const useRigStore = defineStore('rig', {
 
     // Job / report metadata entered by the tester — flows into every export.
     job: {
-      name: seededPlan.job?.name ?? '',
+      name: '',
       id: '',
       testedBy: '',
       reportBy: ''
@@ -29,15 +29,6 @@ export const useRigStore = defineStore('rig', {
     // Default false — Node-RED will push the real retained value via sim.status on
     // every dashboard (re)connect, so we don't want an optimistic 'true' here.
     simulationOn: false,
-
-    // VERIFICATION FLAG — there is no Modbus/RS485 link to the UUT yet, so there
-    // is nothing to compare readings against. While this is false the dashboard
-    // hides ALL pass/fail chrome, tolerance bands, transfer plots and the manual
-    // "controller display" boxes, and treats every channel as a raw signal.
-    // computeStatus(), the sequence engine and the verification UI all stay in
-    // the codebase, dormant — flip this to true (and swap in a live data source)
-    // to bring them back without a rebuild.
-    verificationEnabled: false,
 
     testPlan: seededPlan, // replace via loadTestPlan() once a real map is uploaded
     activeSectionId: firstSection?.id ?? null,
@@ -134,14 +125,15 @@ export const useRigStore = defineStore('rig', {
       return null
     },
 
-    // Channel counts are always derived from testPlan.sections[].points.length —
-    // never hardcoded. Passed/failed only mean anything while verification is on.
+    // Channel counts are always derived from testPlan.sections[].points.length.
+    // Pass/fail comes from computeStatus(), which compares each point's rig
+    // reading against the Carel bus's independent reading via verificationMap.
     sectionSummary: (state) => (sectionId) => {
       const section = state.testPlan.sections.find((s) => s.id === sectionId)
       if (!section) return { total: 0, passed: 0, failed: 0, pending: 0, percent: 0 }
       let passed = 0, failed = 0, pending = 0
       for (const p of section.points) {
-        const status = computeStatus(p)
+        const status = computeStatus(p, state.bmsValues)
         if (status === 'pass') passed++
         else if (status === 'fail') failed++
         else pending++
@@ -155,7 +147,7 @@ export const useRigStore = defineStore('rig', {
       for (const section of state.testPlan.sections) {
         for (const p of section.points) {
           total++
-          if (computeStatus(p) === 'pass') passed++
+          if (computeStatus(p, state.bmsValues) === 'pass') passed++
         }
       }
       return { total, passed, percent: total ? Math.round((passed / total) * 100) : 0 }
@@ -354,10 +346,6 @@ export const useRigStore = defineStore('rig', {
           break
         case 'sim.status':
           this.simulationOn = msg.payload.on
-          break
-        case 'verification.set':
-          // Future hook: Node-RED flips this on once RS485 to the UUT is live.
-          this.verificationEnabled = !!msg.payload.on
           break
         case 'test.status':
           Object.assign(this.testRun, msg.payload)
